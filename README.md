@@ -1,12 +1,19 @@
-# Gerador de Moodboard — grátis, sem IA
+# Gerador de Moodboard — Rachel Patrocínio
 
-Site com um campo de texto: você escreve um tema, ele busca 7 fotos reais em
-bancos de imagens gratuitos (Unsplash e/ou Pexels) e monta o board no
-formato bento dos moodboards de referência (a mesma grade assimétrica: 1
-foto grande, colunas divididas em cima/baixo, respiro fino entre as fotos).
+Site com um campo de texto: você escreve um tema, ele busca fotos reais em
+bancos de imagens gratuitos (Unsplash, Pexels e/ou Pixabay) e monta o board
+no formato bento dos moodboards de referência (grade assimétrica: 1 foto
+grande âncora, colunas divididas em cima/baixo, respiro fino entre as
+fotos). Dá pra escolher entre 4 templates (6, 7, 8 ou 9 fotos).
 
-Não chama nenhuma API de IA — zero tokens, zero custo. Os únicos serviços
-externos são as buscas de imagem, que são gratuitas.
+O modo padrão (busca em banco de imagens) **não chama nenhuma API de IA —
+zero tokens, zero custo**. Os únicos serviços externos são as buscas de
+imagem, que são gratuitas.
+
+Opcionalmente, também dá pra gerar fotos com a **API de imagens da OpenAI**
+(gpt-image-1), seguindo as regras do guia de estilo da Rachel — esse modo
+**tem custo real por imagem** e o site sempre pergunta antes de qualquer
+chamada (veja a seção "Geração por IA" mais abaixo).
 
 Você pode configurar **qualquer combinação** dos três bancos (Unsplash,
 Pexels, Pixabay) — mesmo só um já funciona. Com mais de um configurado, o
@@ -58,10 +65,13 @@ combinação delas presentes, e você pode ir adicionando as outras depois.
 3. Selecione o repositório que você acabou de criar.
 4. Antes de clicar em "Deploy", abra **"Environment Variables"** e adicione
    uma linha para cada chave que você tiver (pode ser só uma, duas ou as
-   três):
+   três — a chave da OpenAI é opcional e separada, veja a seção "Geração
+   por IA"):
    - Nome: `UNSPLASH_ACCESS_KEY` → Valor: a chave do Unsplash
    - Nome: `PEXELS_API_KEY` → Valor: a chave do Pexels
    - Nome: `PIXABAY_API_KEY` → Valor: a chave do Pixabay
+   - Nome: `OPENAI_API_KEY` → Valor: sua chave da OpenAI (só se for usar a
+     geração por IA)
 5. Clique em **Deploy**.
 
 Em ~1 minuto o Vercel te dá um link tipo `seu-projeto.vercel.app` — esse já
@@ -100,6 +110,54 @@ Isso não regenera o board inteiro — só a célula clicada muda. E tanto o
 uso em QUALQUER outra célula do mesmo board (antes disso ser corrigido,
 "Gerar outra" podia trazer de volta uma foto que já estava em outra
 célula).
+
+## Templates
+
+O menu **"Template"**, ao lado do campo de tema, tem 4 opções — todos
+calibrados visualmente a partir dos moodboards de referência da Rachel:
+
+- **6 fotos — mais amplo**: células maiores, menos fragmentado.
+- **7 fotos — padrão**: o formato original (1 coluna cheia, 2 colunas
+  divididas em cima/baixo, 1 coluna cheia à direita dividida).
+- **8 fotos — mais fragmentado**: inclui células bem pequenas no topo.
+- **9 fotos — editorial denso**: variação do 8 com uma célula extra.
+
+Trocar de template muda quantas fotos o board tem e o formato da grade —
+o resto (elementos específicos, alterar imagem, IA) funciona igual em
+qualquer um deles.
+
+## Geração por IA (OpenAI) — opcional, tem custo real
+
+Além da busca gratuita em banco de imagens, dá pra gerar fotos com a API
+de imagens da OpenAI (`gpt-image-1`), seguindo as regras do **Guia Mestre
+de Moodboards da Rachel** (fotografia editorial realista, sem pessoas,
+carga visual leve, paleta dessaturada quente, luz natural suave, sem
+aparência de IA) — o prompt que vai pra API já embute essas regras.
+
+**Isso custa dinheiro de verdade** na conta da OpenAI, então:
+
+- Requer a variável de ambiente `OPENAI_API_KEY` configurada no Vercel
+  (veja o passo 3 acima). Sem ela, o site avisa que a geração por IA não
+  está disponível, mas a busca normal continua funcionando de boa.
+- **O site SEMPRE pergunta antes de qualquer chamada** — uma caixa de
+  confirmação nativa do navegador aparece toda vez, tanto pra gerar o
+  board inteiro quanto pra gerar 1 foto só, avisando quantas chamadas
+  (= quanto custo) aquilo vai gerar. Nada é gerado sem essa confirmação.
+
+Duas formas de usar:
+
+1. **Botão "Gerar moodboard inteiro com IA"** (abaixo do formulário): gera
+   uma foto por IA pra cada papel do template escolhido, uma de cada vez
+   (não em paralelo), preenchendo o board célula por célula. Antes,
+   gere o board normal (banco de imagens) pelo menos uma vez com esse
+   mesmo template, pra carregar o layout da grade.
+2. **Botão "Gerar com IA"** dentro do painel "Alterar imagem" de uma
+   célula: gera só aquela foto.
+
+Em ambos os casos, o campo de texto (na célula) ou **"Instrução extra pra
+IA"** (no formulário principal) deixam você especificar exatamente o que
+quer na imagem — por exemplo "uma vitrine com casacos de lã" ou "usar tons
+mais rosé" — sem precisar reescrever o prompt inteiro.
 
 ## Como funciona (sem IA)
 

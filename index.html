@@ -8,8 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#EDE7DE;
-    --gutter:#F1E9E0;
+    --bg:#F8F1EA;
+    --gutter:#F8F1EA;
     --ink:#3A322C;
     --ink-soft:#7A6F63;
     --accent:#B4794F;
@@ -53,6 +53,19 @@
   button:disabled{opacity:.5;cursor:wait}
 
   p.hint{margin:0 0 22px;color:var(--ink-soft);font-size:12px}
+
+  select{
+    width:100%;padding:14px 12px;border:1px solid #d8cfc2;border-radius:6px;
+    font-size:14px;font-family:inherit;background:var(--card);color:var(--ink);
+  }
+
+  .ia-bloco{
+    border:1px dashed #cabfae;border-radius:8px;padding:16px;margin:-6px 0 22px;
+    display:flex;flex-direction:column;gap:10px;
+  }
+  .ia-bloco .campo{max-width:420px}
+  .ia-bloco button{align-self:flex-start}
+  .ia-bloco p.hint{margin:0}
 
   .board{
     position:relative;width:100%;aspect-ratio:16/9;
@@ -112,12 +125,30 @@
       <label for="elementos">Elementos específicos (opcional)</label>
       <input type="text" id="elementos" placeholder='Ex: "pipoca, algodão doce"' />
     </div>
+    <div class="campo" style="flex:0 0 200px;min-width:170px">
+      <label for="template">Template</label>
+      <select id="template">
+        <option value="6">6 fotos — mais amplo</option>
+        <option value="7" selected>7 fotos — padrão</option>
+        <option value="8">8 fotos — mais fragmentado</option>
+        <option value="9">9 fotos — editorial denso</option>
+      </select>
+    </div>
     <div class="form-botoes">
       <button type="submit" id="btnGerar">Gerar moodboard</button>
       <button type="button" id="btnEmbaralhar" class="secondary" style="display:none">Embaralhar fotos</button>
     </div>
   </form>
   <p class="hint">Elementos específicos: cada item da lista (separado por vírgula) vira uma foto própria no board, além do tema geral.</p>
+
+  <div class="ia-bloco">
+    <div class="campo">
+      <label for="instrucaoIa">Instrução extra pra IA (opcional)</label>
+      <input type="text" id="instrucaoIa" placeholder='Ex: "usar tons mais rosé", "incluir uma cadeira de vime"' />
+    </div>
+    <button type="button" id="btnGerarIa" class="secondary">Gerar moodboard inteiro com IA (OpenAI)</button>
+    <p class="hint">Cada foto do board é gerada em uma chamada separada e paga da API da OpenAI, seguindo o guia de estilo da Rachel. O sistema sempre pergunta antes de gastar.</p>
+  </div>
 
   <div id="status" class="status"></div>
   <div id="output"></div>
@@ -127,32 +158,54 @@
   const form = document.getElementById('f');
   const temaInput = document.getElementById('tema');
   const elementosInput = document.getElementById('elementos');
+  const templateInput = document.getElementById('template');
+  const instrucaoIaInput = document.getElementById('instrucaoIa');
   const btnGerar = document.getElementById('btnGerar');
   const btnEmbaralhar = document.getElementById('btnEmbaralhar');
+  const btnGerarIa = document.getElementById('btnGerarIa');
   const statusEl = document.getElementById('status');
   const output = document.getElementById('output');
 
   let variacao = 1;
 
-  // mesma ordem do SHOT_LIST em api/moodboard.js — define qual papel cai em
-  // qual célula do template, já que data.images pode vir mais curto que 7
-  // (papel sem foto relevante o suficiente fica de fora, não é preenchido
-  // com qualquer coisa)
-  const ROLE_ORDER = ['ambiente', 'produto1', 'textura', 'acao', 'detalhe', 'produto2', 'atmosfera'];
+  // estado do board atual: tema + template + roles (ordem posição->papel,
+  // vem do back-end porque muda de tamanho conforme o template escolhido)
+  // + um mapa role -> { ...dadosDaFoto, tried: Set<url> }. "tried" guarda as
+  // urls já mostradas naquela célula nessa sessão, pra "Gerar outra" nunca
+  // repetir a mesma foto.
+  let state = { tema: '', roles: [], images: {} };
 
-  // estado do board atual: tema + um mapa role -> { ...dadosDaFoto, tried: Set<url> }
-  // "tried" guarda as urls já mostradas naquela célula nessa sessão, pra
-  // "Gerar outra" nunca repetir a mesma foto.
-  let state = { tema: '', images: {} };
+  // mesma ordem/papéis do ROLE_LIBRARY em api/moodboard.js e api/gerar-ia.js
+  // — usado só pra montar a "lista de tiro" no lado do cliente quando se
+  // gera o board inteiro por IA sem antes ter feito uma busca em banco de
+  // imagens (então ainda não existe um state.roles vindo do servidor).
+  const ROLE_LIBRARY_CLIENT = [
+    'ambiente', 'produto1', 'textura', 'acao', 'detalhe', 'produto2', 'atmosfera', 'detalhe2', 'produto3',
+  ];
+
+  function montarShotListCliente(templateSize, elementos){
+    const roles = ROLE_LIBRARY_CLIENT.slice(0, templateSize);
+    const order = roles.filter((r) => r !== 'ambiente');
+    if (roles.includes('ambiente')) order.push('ambiente');
+    const elementoPorRole = {};
+    elementos.slice(0, roles.length).forEach((el, i) => { elementoPorRole[order[i]] = el; });
+    return roles.map((role) => ({ role, elemento: elementoPorRole[role] || null }));
+  }
+
+  function pegarElementos(){
+    return elementosInput.value.split(',').map((s) => s.trim()).filter(Boolean);
+  }
 
   function pct(n){ return (n*100).toFixed(2) + '%'; }
 
   function renderCredits(){
-    const list = ROLE_ORDER.map((r) => state.images[r]).filter(Boolean).filter((x) => x.creditUrl);
+    const list = state.roles.map((r) => state.images[r]).filter(Boolean).filter((x) => x.credit);
     const credits = document.getElementById('credits-line');
     if (!credits) return;
     credits.innerHTML = 'Fotos: ' + list
-      .map((x) => `<a href="${x.creditUrl}" target="_blank" rel="noopener">${x.credit}</a> (${x.source})`)
+      .map((x) => x.creditUrl
+        ? `<a href="${x.creditUrl}" target="_blank" rel="noopener">${x.credit}</a> (${x.source})`
+        : `${x.credit}`)
       .join(', ') + '.';
   }
 
@@ -180,10 +233,13 @@
     const painel = document.createElement('div');
     painel.className = 'painel-troca';
     painel.innerHTML = `
-      <input type="text" placeholder="Buscar algo específico pra esta foto (ex: pipoca)" />
+      <input type="text" placeholder="Descreva o que você quer nesta foto (ex: pipoca)" />
       <div class="linha">
         <button type="button" class="mini btn-buscar">Buscar</button>
         <button type="button" class="mini secondary btn-outra" style="color:#fff;border-color:#8a8175">Gerar outra</button>
+      </div>
+      <div class="linha">
+        <button type="button" class="mini secondary btn-ia" style="color:#fff;border-color:#8a8175;flex:1">Gerar com IA (OpenAI)</button>
       </div>
       <div class="linha">
         <label class="mini secondary btn-upload" style="color:#fff;border-color:#8a8175;cursor:pointer;text-align:center;flex:1">
@@ -200,6 +256,7 @@
     const msg = painel.querySelector('.msg');
     const btnBuscar = painel.querySelector('.btn-buscar');
     const btnOutra = painel.querySelector('.btn-outra');
+    const btnIa = painel.querySelector('.btn-ia');
     const btnCancelar = painel.querySelector('.btn-cancelar');
     const inputUpload = painel.querySelector('.input-upload');
 
@@ -207,7 +264,22 @@
 
     function aplicarNaCelula(imagem){
       state.images[role] = imagem;
-      const img = cell.querySelector('img');
+      let img = cell.querySelector('img');
+      if (!img) {
+        cell.textContent = '';
+        img = document.createElement('img');
+        cell.appendChild(img);
+        const btnAlterar = document.createElement('button');
+        btnAlterar.type = 'button';
+        btnAlterar.className = 'alterar-btn';
+        btnAlterar.textContent = 'Alterar imagem';
+        btnAlterar.addEventListener('click', () => abrirPainel(cell, role));
+        cell.appendChild(btnAlterar);
+        cell.style.display = '';
+        cell.style.alignItems = '';
+        cell.style.justifyContent = '';
+        cell.style.padding = '';
+      }
       img.src = imagem.url;
       img.alt = imagem.alt || state.tema;
       renderCredits();
@@ -255,10 +327,46 @@
       trocar(atual.query || state.tema, false);
     });
 
+    btnIa.addEventListener('click', async () => {
+      const confirmou = window.confirm(
+        'Isso vai gerar 1 imagem usando a API PAGA da OpenAI (gpt-image-1). ' +
+        'Cada geração tem custo real na sua conta da OpenAI. Quer continuar?'
+      );
+      if (!confirmou) return;
+
+      const elemento = input.value.trim();
+      msg.textContent = 'Gerando com IA...';
+      btnBuscar.disabled = true;
+      btnOutra.disabled = true;
+      btnIa.disabled = true;
+      try {
+        const r = await fetch('/api/gerar-ia', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tema: state.tema,
+            role,
+            elemento,
+            instrucao: instrucaoIaInput.value.trim(),
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Erro desconhecido');
+        const atual = state.images[role];
+        data.image.tried = new Set([...(atual.tried || []), data.image.url]);
+        aplicarNaCelula(data.image);
+      } catch (err) {
+        msg.textContent = 'Erro: ' + err.message;
+      } finally {
+        btnBuscar.disabled = false;
+        btnOutra.disabled = false;
+        btnIa.disabled = false;
+      }
+    });
+
     // upload local: não passa pelo servidor, não usa banco de imagens nem
     // busca nenhuma — só troca a foto da célula por um arquivo do
-    // computador da Rachel, direto no navegador (por isso ela não entra na
-    // lista de créditos, já que não é uma foto de banco de imagens).
+    // computador da Rachel, direto no navegador.
     inputUpload.addEventListener('change', () => {
       const file = inputUpload.files && inputUpload.files[0];
       if (!file) return;
@@ -274,7 +382,7 @@
           role,
           url: reader.result,
           alt: file.name,
-          credit: null,
+          credit: 'Sua foto',
           creditUrl: null,
           source: 'Upload',
           query: atual.query,
@@ -288,6 +396,7 @@
 
   function render(data){
     state.tema = data.tema;
+    state.roles = data.roles;
     state.images = {};
     data.images.forEach((img) => {
       img.tried = new Set([img.url]);
@@ -299,7 +408,7 @@
     board.className = 'board';
 
     data.template.forEach((slot, i) => {
-      const role = ROLE_ORDER[i];
+      const role = data.roles[i];
       const img = state.images[role];
       const cell = document.createElement('div');
       cell.className = 'cell';
@@ -307,17 +416,18 @@
       cell.style.top = pct(slot.top);
       cell.style.width = pct(slot.width);
       cell.style.height = pct(slot.height);
+
+      const btnAlterar = document.createElement('button');
+      btnAlterar.type = 'button';
+      btnAlterar.className = 'alterar-btn';
+      btnAlterar.textContent = 'Alterar imagem';
+      btnAlterar.addEventListener('click', () => abrirPainel(cell, role));
+
       if (img) {
         const el = document.createElement('img');
         el.src = img.url;
         el.alt = img.alt || data.tema;
         cell.appendChild(el);
-
-        const btnAlterar = document.createElement('button');
-        btnAlterar.type = 'button';
-        btnAlterar.className = 'alterar-btn';
-        btnAlterar.textContent = 'Alterar imagem';
-        btnAlterar.addEventListener('click', () => abrirPainel(cell, role));
         cell.appendChild(btnAlterar);
       } else {
         cell.style.display = 'flex';
@@ -328,6 +438,7 @@
         cell.style.textAlign = 'center';
         cell.style.padding = '8px';
         cell.textContent = 'Sem foto relevante o bastante pra este papel';
+        cell.appendChild(btnAlterar);
       }
       board.appendChild(cell);
     });
@@ -337,7 +448,7 @@
     if (data.faltando > 0) {
       const warn = document.createElement('p');
       warn.className = 'status';
-      warn.textContent = `${data.faltando} de ${data.images.length + data.faltando} fotos ficaram sem imagem relevante o bastante — tente um tema mais específico, clique em Embaralhar, ou use "Alterar imagem" pra buscar algo pra essa célula.`;
+      warn.textContent = `${data.faltando} de ${data.images.length + data.faltando} fotos ficaram sem imagem relevante o bastante — tente um tema mais específico, clique em Embaralhar, ou use "Alterar imagem" pra buscar/gerar algo pra essa célula.`;
       output.appendChild(warn);
     }
 
@@ -350,16 +461,18 @@
     btnEmbaralhar.style.display = 'inline-block';
   }
 
-  async function gerar(tema, elementos, variacaoParam){
+  async function gerar(tema, elementos, template, variacaoParam){
     statusEl.textContent = 'Buscando fotos no banco de imagens...';
     btnGerar.disabled = true;
     btnEmbaralhar.disabled = true;
     try {
-      const params = new URLSearchParams({ tema, variacao: String(variacaoParam) });
+      const params = new URLSearchParams({ tema, template: String(template), variacao: String(variacaoParam) });
       if (elementos) params.set('elementos', elementos);
       const r = await fetch(`/api/moodboard?${params.toString()}`);
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Erro desconhecido');
+      state.templateRects = state.templateRects || {};
+      state.templateRects[template] = data.template;
       render(data);
       statusEl.textContent = `Moodboard gerado para "${tema}".`;
     } catch (err) {
@@ -371,15 +484,92 @@
     }
   }
 
+  // gera o board INTEIRO com IA: uma chamada paga da OpenAI por foto,
+  // sequencial (não em paralelo, pra não estourar limite de taxa nem gerar
+  // tudo de uma vez sem controle), preenchendo o board célula por célula.
+  async function gerarBoardComIa(tema, elementos, template){
+    const templateSize = parseInt(template, 10);
+    const shotList = montarShotListCliente(templateSize, elementos);
+    const confirmou = window.confirm(
+      `Isso vai gerar ${shotList.length} imagens usando a API PAGA da OpenAI (gpt-image-1) — ` +
+      `${shotList.length} chamadas cobradas na sua conta da OpenAI. Quer continuar?`
+    );
+    if (!confirmou) return;
+
+    const rects = state.templateRects && state.templateRects[template];
+    if (!rects) {
+      statusEl.textContent = 'Gere o moodboard normal (banco de imagens) pelo menos uma vez com esse template antes, pra carregar o layout da grade.';
+      return;
+    }
+
+    const instrucao = instrucaoIaInput.value.trim();
+    state.tema = tema;
+    state.roles = shotList.map((s) => s.role);
+    state.images = {};
+    render({ tema, template: rects, roles: state.roles, images: [], faltando: 0 });
+
+    btnGerarIa.disabled = true;
+    for (let i = 0; i < shotList.length; i++) {
+      const shot = shotList[i];
+      statusEl.textContent = `Gerando foto ${i + 1} de ${shotList.length} com IA (${shot.role})...`;
+      try {
+        const r = await fetch('/api/gerar-ia', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tema, role: shot.role, elemento: shot.elemento || '', instrucao }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Erro desconhecido');
+        data.image.tried = new Set([data.image.url]);
+        state.images[shot.role] = data.image;
+        const cells = output.querySelectorAll('.cell');
+        const idx = state.roles.indexOf(shot.role);
+        if (idx >= 0 && cells[idx]) {
+          const cellEl = cells[idx];
+          let imgEl = cellEl.querySelector('img');
+          if (!imgEl) {
+            cellEl.textContent = '';
+            imgEl = document.createElement('img');
+            cellEl.appendChild(imgEl);
+            const btnAlterar = document.createElement('button');
+            btnAlterar.type = 'button';
+            btnAlterar.className = 'alterar-btn';
+            btnAlterar.textContent = 'Alterar imagem';
+            btnAlterar.addEventListener('click', () => abrirPainel(cellEl, shot.role));
+            cellEl.appendChild(btnAlterar);
+            cellEl.style.display = '';
+            cellEl.style.alignItems = '';
+            cellEl.style.justifyContent = '';
+            cellEl.style.padding = '';
+          }
+          imgEl.src = data.image.url;
+          imgEl.alt = data.image.alt || tema;
+        }
+        renderCredits();
+      } catch (err) {
+        statusEl.textContent = `Erro ao gerar "${shot.role}" com IA: ${err.message}`;
+      }
+    }
+
+    btnGerarIa.disabled = false;
+    statusEl.textContent = `Moodboard gerado com IA para "${tema}".`;
+  }
+
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     variacao = 1;
-    gerar(temaInput.value.trim(), elementosInput.value.trim(), variacao);
+    gerar(temaInput.value.trim(), elementosInput.value.trim(), templateInput.value, variacao);
   });
 
   btnEmbaralhar.addEventListener('click', () => {
     variacao = variacao >= 3 ? 1 : variacao + 1;
-    gerar(temaInput.value.trim(), elementosInput.value.trim(), variacao);
+    gerar(temaInput.value.trim(), elementosInput.value.trim(), templateInput.value, variacao);
+  });
+
+  btnGerarIa.addEventListener('click', () => {
+    const tema = temaInput.value.trim();
+    if (!tema) { statusEl.textContent = 'Escreva um tema primeiro.'; return; }
+    gerarBoardComIa(tema, pegarElementos(), templateInput.value);
   });
 </script>
 </body>

@@ -26,7 +26,9 @@
 // (boostWords) servem só de DESEMPATE interno pra decidir qual foto, DENTRE
 // as já filtradas como relevantes ao tema, cai em qual célula do grid —
 // nunca pra decidir se uma foto é relevante.
-const SHOT_LIST = [
+// biblioteca de papéis (mais que os 7 originais, pra dar conta dos
+// templates de 8 e 9 fotos) — cada template usa só os N primeiros.
+const ROLE_LIBRARY = [
   { role: "ambiente", boostWords: ["interior", "room", "space", "indoor", "shop"] },
   { role: "produto1", boostWords: ["closeup", "close", "product"] },
   { role: "textura", boostWords: ["texture", "pattern", "material", "wood", "fabric", "surface"] },
@@ -34,7 +36,10 @@ const SHOT_LIST = [
   { role: "detalhe", boostWords: ["detail", "close"] },
   { role: "produto2", boostWords: ["storefront", "sign", "entrance", "facade", "window", "display"] },
   { role: "atmosfera", boostWords: ["decor", "decoration", "light", "plant", "cozy", "ambience"] },
+  { role: "detalhe2", boostWords: ["detail", "texture", "close"] },
+  { role: "produto3", boostWords: ["product", "closeup", "detail"] },
 ];
+const SHOT_LIST = ROLE_LIBRARY.slice(0, 7);
 
 // Reforço de ESTILO (não de tema): aplicado em toda foto, de todo papel, não
 // só num específico. É o que aproxima do padrão visual das referências da
@@ -57,16 +62,63 @@ const GENERIC_STOCK_WORDS = [
   "businesswoman", "stock photo",
 ];
 
-// mesmas proporções do template de 7 fotos (build_moodboard.py TEMPLATES[7])
-const TEMPLATE_7 = [
-  { left: 0.0, top: 0.0, width: 0.266, height: 1.0 },
-  { left: 0.274, top: 0.0, width: 0.196, height: 0.575 },
-  { left: 0.274, top: 0.585, width: 0.196, height: 0.415 },
-  { left: 0.478, top: 0.0, width: 0.226, height: 0.675 },
-  { left: 0.478, top: 0.685, width: 0.226, height: 0.315 },
-  { left: 0.714, top: 0.0, width: 0.286, height: 0.445 },
-  { left: 0.714, top: 0.455, width: 0.286, height: 0.545 },
-];
+// Proporções de cada template — calibradas visualmente a partir dos
+// moodboards de referência da Rachel (mistura de coluna cheia + colunas
+// divididas em 2 células empilhadas, larguras desiguais). Templates com
+// mais fotos têm células menores (mais fragmentado); com menos fotos,
+// células maiores. "id" é o que aparece no seletor de template do site.
+const TEMPLATES = {
+  6: {
+    label: "6 fotos — mais amplo",
+    rects: [
+      { left: 0, top: 0, width: 0.225, height: 0.444 },
+      { left: 0.25, top: 0, width: 0.225, height: 0.444 },
+      { left: 0, top: 0.478, width: 0.47, height: 0.514 },
+      { left: 0.495, top: 0, width: 0.245, height: 0.984 },
+      { left: 0.76, top: 0, width: 0.11, height: 0.444 },
+      { left: 0.76, top: 0.478, width: 0.235, height: 0.514 },
+    ],
+  },
+  7: {
+    label: "7 fotos — padrão",
+    rects: [
+      { left: 0.0, top: 0.0, width: 0.266, height: 1.0 },
+      { left: 0.274, top: 0.0, width: 0.196, height: 0.575 },
+      { left: 0.274, top: 0.585, width: 0.196, height: 0.415 },
+      { left: 0.478, top: 0.0, width: 0.226, height: 0.675 },
+      { left: 0.478, top: 0.685, width: 0.226, height: 0.315 },
+      { left: 0.714, top: 0.0, width: 0.286, height: 0.445 },
+      { left: 0.714, top: 0.455, width: 0.286, height: 0.545 },
+    ],
+  },
+  8: {
+    label: "8 fotos — mais fragmentado",
+    rects: [
+      { left: 0, top: 0, width: 0.145, height: 0.139 },
+      { left: 0.165, top: 0, width: 0.145, height: 0.139 },
+      { left: 0, top: 0.173, width: 0.305, height: 0.399 },
+      { left: 0.33, top: 0, width: 0.145, height: 0.564 },
+      { left: 0, top: 0.598, width: 0.47, height: 0.394 },
+      { left: 0.495, top: 0, width: 0.225, height: 0.664 },
+      { left: 0.495, top: 0.693, width: 0.225, height: 0.299 },
+      { left: 0.74, top: 0, width: 0.255, height: 0.984 },
+    ],
+  },
+  9: {
+    label: "9 fotos — editorial denso",
+    rects: [
+      { left: 0, top: 0, width: 0.145, height: 0.139 },
+      { left: 0.165, top: 0, width: 0.145, height: 0.139 },
+      { left: 0.325, top: 0, width: 0.145, height: 0.139 },
+      { left: 0, top: 0.173, width: 0.465, height: 0.404 },
+      { left: 0, top: 0.603, width: 0.465, height: 0.389 },
+      { left: 0.49, top: 0, width: 0.225, height: 0.534 },
+      { left: 0.49, top: 0.568, width: 0.225, height: 0.424 },
+      { left: 0.735, top: 0, width: 0.26, height: 0.604 },
+      { left: 0.735, top: 0.638, width: 0.26, height: 0.354 },
+    ],
+  },
+};
 
 const STOPWORDS = new Set([
   "de", "da", "do", "das", "dos", "e", "a", "o", "os", "as", "em", "com",
@@ -382,23 +434,26 @@ function providerTier(source) {
   return source === "Pixabay" ? 1 : 0;
 }
 
-// papéis que podem ser "tomados" por um elemento específico que a Rachel
-// pediu (ex: "pipoca", "algodão doce"), do mais livre pro mais estrutural —
-// "ambiente" (a foto grande, âncora do board) só vira elemento se sobrarem
-// elementos depois de preencher todos os outros papéis.
-const ELEMENT_REPLACEABLE_ORDER = [
-  "produto1", "detalhe", "produto2", "atmosfera", "textura", "acao", "ambiente",
-];
+// ordem de preferência pra um papel ser "tomado" por um elemento específico
+// que a Rachel pediu (ex: "pipoca", "algodão doce"): qualquer papel menos
+// "ambiente" primeiro (do mais livre pro mais estrutural), "ambiente" (a
+// foto grande, âncora do board) só se sobrar elemento depois de preencher
+// todos os outros — funciona pra shot list de qualquer tamanho (6 a 9).
+function elementReplaceOrder(shotList) {
+  const others = shotList.map((s) => s.role).filter((r) => r !== "ambiente");
+  return shotList.some((s) => s.role === "ambiente") ? [...others, "ambiente"] : others;
+}
 
-// monta o shot list de uma geração: por padrão é o SHOT_LIST fixo, mas cada
-// "elemento específico" pedido (lista de textos livres) ocupa um papel,
-// virando uma busca PRÓPRIA (independente da busca geral do tema) — sem
-// elementos, o comportamento é idêntico ao de antes.
-function buildShotList(elementos) {
-  const base = SHOT_LIST.map((s) => ({ ...s }));
+// monta o shot list de uma geração a partir do template escolhido (número
+// de fotos), e cada "elemento específico" pedido (lista de textos livres)
+// ocupa um papel, virando uma busca PRÓPRIA (independente da busca geral do
+// tema) — sem elementos, o comportamento é o padrão pra aquele template.
+function buildShotList(templateSize, elementos) {
+  const base = ROLE_LIBRARY.slice(0, templateSize).map((s) => ({ ...s }));
   const byRole = Object.fromEntries(base.map((s) => [s.role, s]));
+  const order = elementReplaceOrder(base);
   elementos.slice(0, base.length).forEach((elemento, i) => {
-    const role = ELEMENT_REPLACEABLE_ORDER[i];
+    const role = order[i];
     if (role && byRole[role]) byRole[role].elemento = elemento;
   });
   return base;
@@ -502,7 +557,7 @@ async function pickAllShots(tema, temaQuery, keywords, page, variacaoIdx, shotLi
 // escopada a 1 papel só. `excluirUrls` evita repetir fotos já mostradas
 // nessa célula durante a mesma sessão de troca.
 async function pickSingleShot(busca, role, excluirUrls, page, variacaoIdx) {
-  const shotDef = SHOT_LIST.find((s) => s.role === role) || { role, boostWords: [] };
+  const shotDef = ROLE_LIBRARY.find((s) => s.role === role) || { role, boostWords: [] };
   const query = queryTerms(busca);
   const keywords = themeKeywords(busca);
   if (!keywords.length) return { error: "Escreva um termo de busca com pelo menos uma palavra específica." };
@@ -575,6 +630,10 @@ export default async function handler(req, res) {
   }
   const temaQuery = queryTerms(tema);
 
+  const templateId = parseInt(req.query.template, 10);
+  const templateSize = TEMPLATES[templateId] ? templateId : 7;
+  const template = TEMPLATES[templateSize];
+
   // elementos específicos (opcional): lista separada por vírgula, ex:
   // "pipoca, algodão doce" — cada um vira a busca de um papel do board.
   const elementos = (req.query.elementos || "")
@@ -582,7 +641,7 @@ export default async function handler(req, res) {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  const shotList = buildShotList(elementos);
+  const shotList = buildShotList(templateSize, elementos);
 
   try {
     const picked = await pickAllShots(tema, temaQuery, keywords, page, variacaoIdx, shotList);
@@ -592,7 +651,15 @@ export default async function handler(req, res) {
 
     res.status(200).json({
       tema,
-      template: TEMPLATE_7,
+      templateId: templateSize,
+      template: template.rects,
+      // ordem dos papéis, posição a posição, casando com "template" acima —
+      // o front-end usa isso em vez de uma lista fixa, já que o tamanho e a
+      // ordem mudam de template pra template
+      roles: shotList.map((s) => s.role),
+      templates: Object.fromEntries(
+        Object.entries(TEMPLATES).map(([id, t]) => [id, t.label])
+      ),
       images,
       faltando, // quantos "papéis" ficaram sem foto relevante o suficiente
       fontes: { unsplash: hasUnsplash, pexels: hasPexels, pixabay: hasPixabay },
