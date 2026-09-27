@@ -162,6 +162,15 @@
     cell.classList.remove('editando');
   }
 
+  // urls de todas as OUTRAS células do board (usado pra nunca escolher, numa
+  // troca, uma foto que já está em uso em outra célula do mesmo moodboard)
+  function urlsDasOutrasCelulas(role){
+    return Object.keys(state.images)
+      .filter((r) => r !== role)
+      .map((r) => state.images[r] && state.images[r].url)
+      .filter(Boolean);
+  }
+
   function abrirPainel(cell, role){
     // fecha qualquer outro painel aberto antes de abrir este
     document.querySelectorAll('.cell.editando').forEach((c) => { if (c !== cell) fecharPainel(c); });
@@ -175,19 +184,35 @@
       <div class="linha">
         <button type="button" class="mini btn-buscar">Buscar</button>
         <button type="button" class="mini secondary btn-outra" style="color:#fff;border-color:#8a8175">Gerar outra</button>
+      </div>
+      <div class="linha">
+        <label class="mini secondary btn-upload" style="color:#fff;border-color:#8a8175;cursor:pointer;text-align:center;flex:1">
+          Enviar do computador
+          <input type="file" accept="image/*" class="input-upload" style="display:none" />
+        </label>
         <button type="button" class="mini secondary btn-cancelar" style="color:#fff;border-color:#8a8175">Cancelar</button>
       </div>
       <div class="msg"></div>
     `;
     cell.appendChild(painel);
 
-    const input = painel.querySelector('input');
+    const input = painel.querySelector('input[type=text]');
     const msg = painel.querySelector('.msg');
     const btnBuscar = painel.querySelector('.btn-buscar');
     const btnOutra = painel.querySelector('.btn-outra');
     const btnCancelar = painel.querySelector('.btn-cancelar');
+    const inputUpload = painel.querySelector('.input-upload');
 
     btnCancelar.addEventListener('click', () => fecharPainel(cell));
+
+    function aplicarNaCelula(imagem){
+      state.images[role] = imagem;
+      const img = cell.querySelector('img');
+      img.src = imagem.url;
+      img.alt = imagem.alt || state.tema;
+      renderCredits();
+      fecharPainel(cell);
+    }
 
     async function trocar(busca, resetTried){
       msg.textContent = 'Buscando...';
@@ -196,23 +221,21 @@
       try {
         const atual = state.images[role];
         if (resetTried) atual.tried = new Set();
-        const excluir = Array.from(atual.tried || []).join(',');
+        // nunca repetir foto já usada NESSA célula OU em qualquer outra
+        // célula do board — as duas listas juntas é que vão pro "excluir"
+        const excluirSet = new Set([...(atual.tried || []), ...urlsDasOutrasCelulas(role)]);
+        const excluir = Array.from(excluirSet).join(',');
         const url = `/api/moodboard?tema=${encodeURIComponent(state.tema)}&role=${encodeURIComponent(role)}` +
           `&busca=${encodeURIComponent(busca)}&excluir=${encodeURIComponent(excluir)}&variacao=1`;
         const r = await fetch(url);
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || 'Erro desconhecido');
         if (!data.image) {
-          msg.textContent = 'Nenhuma foto relevante encontrada pra esse termo.';
+          msg.textContent = 'Nenhuma foto relevante nova encontrada pra esse termo.';
           return;
         }
         data.image.tried = new Set([...(atual.tried || []), data.image.url]);
-        state.images[role] = data.image;
-        const img = cell.querySelector('img');
-        img.src = data.image.url;
-        img.alt = data.image.alt || busca;
-        renderCredits();
-        fecharPainel(cell);
+        aplicarNaCelula(data.image);
       } catch (err) {
         msg.textContent = 'Erro: ' + err.message;
       } finally {
@@ -230,6 +253,36 @@
     btnOutra.addEventListener('click', () => {
       const atual = state.images[role];
       trocar(atual.query || state.tema, false);
+    });
+
+    // upload local: não passa pelo servidor, não usa banco de imagens nem
+    // busca nenhuma — só troca a foto da célula por um arquivo do
+    // computador da Rachel, direto no navegador (por isso ela não entra na
+    // lista de créditos, já que não é uma foto de banco de imagens).
+    inputUpload.addEventListener('change', () => {
+      const file = inputUpload.files && inputUpload.files[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) {
+        msg.textContent = 'Escolha um arquivo de imagem.';
+        return;
+      }
+      msg.textContent = 'Carregando arquivo...';
+      const reader = new FileReader();
+      reader.onload = () => {
+        const atual = state.images[role];
+        aplicarNaCelula({
+          role,
+          url: reader.result,
+          alt: file.name,
+          credit: null,
+          creditUrl: null,
+          source: 'Upload',
+          query: atual.query,
+          tried: new Set([...(atual.tried || []), reader.result]),
+        });
+      };
+      reader.onerror = () => { msg.textContent = 'Não deu pra ler esse arquivo.'; };
+      reader.readAsDataURL(file);
     });
   }
 

@@ -90,10 +90,16 @@ Depois que o board é gerado, passe o mouse sobre qualquer foto e clique em
 - **Escrever um termo de busca** (ex: "vitrine com roupas de frio") e clicar
   em **Buscar** — troca só aquela foto por uma busca nova.
 - Clicar em **"Gerar outra"** sem escrever nada — sorteia outra foto
-  relevante pro mesmo assunto que já estava naquela célula, sem repetir a
-  que já apareceu ali durante essa sessão.
+  relevante pro mesmo assunto que já estava naquela célula.
+- Clicar em **"Enviar do computador"** — escolhe um arquivo de imagem do
+  computador e usa ele naquela célula, sem passar por nenhum banco de
+  imagens (é só um upload local no navegador, não sobe pra lugar nenhum).
 
-Isso não regenera o board inteiro — só a célula clicada muda.
+Isso não regenera o board inteiro — só a célula clicada muda. E tanto o
+"Buscar" quanto o "Gerar outra" nunca escolhem uma foto que já esteja em
+uso em QUALQUER outra célula do mesmo board (antes disso ser corrigido,
+"Gerar outra" podia trazer de volta uma foto que já estava em outra
+célula).
 
 ## Como funciona (sem IA)
 
