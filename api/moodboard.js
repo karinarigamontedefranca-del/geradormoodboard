@@ -166,7 +166,50 @@ const PT_EN_DICT = {
   neve: "snow",
   cabana: "cabin",
   pinheiro: "pine tree",
+  pipoca: "popcorn",
+  algodao: "cotton",
+  sorvete: "ice cream",
+  chocolate: "chocolate",
+  brinquedo: "toy",
+  brinquedos: "toys",
+  balao: "balloon",
+  baloes: "balloons",
+  pizza: "pizza",
+  hamburguer: "burger",
+  brigadeiro: "brigadeiro",
+  cupcake: "cupcake",
+  biscoito: "cookie",
+  biscoitos: "cookies",
+  bolo: "cake",
 };
+
+// Frases inteiras (2+ palavras) que precisam ser traduzidas como bloco —
+// traduzir palavra por palavra quebraria o sentido (ex: "algodão" + "doce"
+// separados não formam "cotton candy"). Aplicado ANTES da tradução por
+// palavra, então essas frases têm prioridade. Cobre principalmente comidas
+// de feira/festa, comuns nos "elementos específicos" (ver ELEMENTOS mais
+// abaixo), já que é o caso de uso mais provável pra frases assim.
+const PHRASE_DICT = {
+  "algodao doce": "cotton candy",
+  "maca do amor": "candy apple",
+  "cachorro quente": "hot dog",
+  "milho verde": "corn on the cob",
+  "arvore de natal": "christmas tree",
+  "pipoca doce": "sweet popcorn",
+  "bala de goma": "gummy candy",
+  "picole": "popsicle",
+};
+
+function applyPhraseDict(normalizedStr) {
+  let out = normalizedStr;
+  // frases mais longas primeiro, pra uma frase curta não "roubar" parte de
+  // uma mais longa que a contém
+  const phrases = Object.keys(PHRASE_DICT).sort((a, b) => b.length - a.length);
+  for (const phrase of phrases) {
+    if (out.includes(phrase)) out = out.split(phrase).join(PHRASE_DICT[phrase]);
+  }
+  return out;
+}
 
 function translateWord(w) {
   return PT_EN_DICT[w] || null;
@@ -177,7 +220,7 @@ function translateWord(w) {
 // majoritariamente em inglês, então isso melhora a busca em geral, além de
 // resolver ambiguidades tipo "natal").
 function queryTerms(tema) {
-  return normalize(tema)
+  return applyPhraseDict(normalize(tema))
     .split(/\s+/)
     .filter((w) => w && !STOPWORDS.has(w)) // remove conectivos em PT (ex: "de")
     .map((w) => translateWord(w) || w)
@@ -189,7 +232,7 @@ function queryTerms(tema) {
 // tradução (e não a palavra original) quando ela existe é o que evita a
 // foto de praia entrar pontuada como relevante pra "natal".
 function themeKeywords(tema) {
-  return normalize(tema)
+  return applyPhraseDict(normalize(tema))
     .split(/\s+/)
     .filter((w) => w.length >= 3 && !STOPWORDS.has(w))
     .map((w) => translateWord(w) || w);
@@ -339,60 +382,138 @@ function providerTier(source) {
   return source === "Pixabay" ? 1 : 0;
 }
 
-// busca UMA VEZ (por tema puro, sem sufixo) e distribui fotos DISTINTAS
-// entre os 7 papéis do shot list. O desempate combina três coisas, nessa
-// ordem de prioridade:
+// papéis que podem ser "tomados" por um elemento específico que a Rachel
+// pediu (ex: "pipoca", "algodão doce"), do mais livre pro mais estrutural —
+// "ambiente" (a foto grande, âncora do board) só vira elemento se sobrarem
+// elementos depois de preencher todos os outros papéis.
+const ELEMENT_REPLACEABLE_ORDER = [
+  "produto1", "detalhe", "produto2", "atmosfera", "textura", "acao", "ambiente",
+];
+
+// monta o shot list de uma geração: por padrão é o SHOT_LIST fixo, mas cada
+// "elemento específico" pedido (lista de textos livres) ocupa um papel,
+// virando uma busca PRÓPRIA (independente da busca geral do tema) — sem
+// elementos, o comportamento é idêntico ao de antes.
+function buildShotList(elementos) {
+  const base = SHOT_LIST.map((s) => ({ ...s }));
+  const byRole = Object.fromEntries(base.map((s) => [s.role, s]));
+  elementos.slice(0, base.length).forEach((elemento, i) => {
+    const role = ELEMENT_REPLACEABLE_ORDER[i];
+    if (role && byRole[role]) byRole[role].elemento = elemento;
+  });
+  return base;
+}
+
+// pontua e ordena um pool de candidatos (já filtrado por relevância) pro
+// desempate de um papel específico. Combina, nessa ordem de prioridade:
 //   1. fonte (Unsplash/Pexels antes de Pixabay, ver providerTier)
 //   2. estilo editorial (STYLE_BOOST_WORDS) menos "cara de stock genérico"
 //      (GENERIC_STOCK_WORDS) — aproxima do visual das referências da Rachel
 //   3. o quanto a legenda bate com o tipo de plano daquele papel (boostWords)
-// Nada disso decide SE a foto é relevante ao tema — isso já foi decidido
-// pelo score>0 (linha abaixo). E o "match" de cada lista de palavras é
-// tratado como sim/não (no máx. +1), nunca somando 1 ponto por palavra
-// repetida — é isso que impede uma legenda com dezenas de tags de vencer
-// só por ter mais chance de bater em alguma palavra.
-async function pickAllShots(temaQuery, keywords, page, variacaoIdx) {
-  const pool = await collectRanked(temaQuery, keywords, page);
+// O "match" de cada lista de palavras é sim/não (no máx. +1), nunca soma 1
+// ponto por palavra repetida — é isso que impede uma legenda com dezenas de
+// tags ganhar só por ter mais chance de bater em alguma palavra.
+function rankCandidates(pool, boostWords) {
+  return pool
+    .map((p) => {
+      const alt = p.photo.alt || "";
+      const styleHit = relevanceScore(alt, STYLE_BOOST_WORDS) > 0 ? 1 : 0;
+      const genericHit = relevanceScore(alt, GENERIC_STOCK_WORDS) > 0 ? 1 : 0;
+      const roleHit = relevanceScore(alt, boostWords) > 0 ? 1 : 0;
+      return { ...p, tier: providerTier(p.photo.source), boost: styleHit - genericHit + roleHit };
+    })
+    .sort((a, b) => a.tier - b.tier || b.boost - a.boost);
+}
 
-  // só entram no jogo fotos que batem com pelo menos 1 palavra real do
-  // tema — o resto fica de fora (melhor faltar foto que mostrar algo sem
-  // relação nenhuma com o tema)
-  const relevant = pool.filter((p) => p.score > 0);
-  if (!relevant.length) return SHOT_LIST.map(() => null);
+// escolhe 1 foto de um pool já ranqueado, respeitando "já usadas" e a
+// variação do botão Embaralhar (mesma foto sempre na 1ª geração; só varia
+// entre as empatadas quando variacaoIdx>0)
+function pickOne(rankedPool, usedUrls, variacaoIdx) {
+  const candidates = rankedPool.filter((p) => !usedUrls.has(p.photo.url));
+  if (!candidates.length) return null;
+
+  const topTierValue = candidates[0].tier;
+  const topBoost = candidates.find((p) => p.tier === topTierValue).boost;
+  const tier = candidates.filter((p) => p.tier === topTierValue && p.boost === topBoost);
+
+  return variacaoIdx === 0 ? tier[0] : tier[variacaoIdx % tier.length];
+}
+
+function finalizeImage(role, query, chosen) {
+  pingUnsplashDownload(chosen.photo);
+  const { _downloadLocation, ...clean } = chosen.photo;
+  return { role, score: chosen.score, query, ...clean };
+}
+
+// gera o board inteiro: papéis "de elemento" (ver buildShotList) fazem cada
+// um sua PRÓPRIA busca (independente do tema, pra não diluir a relevância
+// do elemento pedido); os demais papéis dividem uma única busca pelo tema
+// puro. Elementos são resolvidos primeiro (pool mais estreito, menos
+// opção), o resto depois, pra não sobrar elemento sem foto por causa de um
+// papel genérico ter "roubado" a única foto boa daquele elemento.
+async function pickAllShots(tema, temaQuery, keywords, page, variacaoIdx, shotList) {
+  const elementShots = shotList.filter((s) => s.elemento);
+  const genericShots = shotList.filter((s) => !s.elemento);
 
   const usedUrls = new Set();
+  const results = {};
 
-  return SHOT_LIST.map((shot) => {
-    const candidates = relevant
-      .filter((p) => !usedUrls.has(p.photo.url))
-      .map((p) => {
-        const alt = p.photo.alt || "";
-        const styleHit = relevanceScore(alt, STYLE_BOOST_WORDS) > 0 ? 1 : 0;
-        const genericHit = relevanceScore(alt, GENERIC_STOCK_WORDS) > 0 ? 1 : 0;
-        const roleHit = relevanceScore(alt, shot.boostWords) > 0 ? 1 : 0;
-        return {
-          ...p,
-          tier: providerTier(p.photo.source),
-          boost: styleHit - genericHit + roleHit,
-        };
-      })
-      .sort((a, b) => a.tier - b.tier || b.boost - a.boost);
+  // 1) papéis de elemento específico
+  for (const shot of elementShots) {
+    const elQuery = queryTerms(shot.elemento);
+    const elKeywords = themeKeywords(shot.elemento);
+    const pool = elKeywords.length ? await collectRanked(elQuery, elKeywords, page) : [];
+    const relevant = rankCandidates(pool.filter((p) => p.score > 0), shot.boostWords);
+    const chosen = pickOne(relevant, usedUrls, variacaoIdx);
+    if (chosen) {
+      usedUrls.add(chosen.photo.url);
+      results[shot.role] = finalizeImage(shot.role, shot.elemento, chosen);
+    } else {
+      results[shot.role] = null;
+    }
+  }
 
-    if (!candidates.length) return null;
+  // 2) papéis genéricos, todos a partir de UMA busca pelo tema
+  if (genericShots.length) {
+    const pool = await collectRanked(temaQuery, keywords, page);
+    const relevant = pool.filter((p) => p.score > 0);
+    for (const shot of genericShots) {
+      const ranked = rankCandidates(
+        relevant.filter((p) => !usedUrls.has(p.photo.url)),
+        shot.boostWords
+      );
+      const chosen = pickOne(ranked, usedUrls, variacaoIdx);
+      if (chosen) {
+        usedUrls.add(chosen.photo.url);
+        results[shot.role] = finalizeImage(shot.role, tema, chosen);
+      } else {
+        results[shot.role] = null;
+      }
+    }
+  }
 
-    const topTierValue = candidates[0].tier;
-    const topBoost = candidates.find((p) => p.tier === topTierValue).boost;
-    const tier = candidates.filter((p) => p.tier === topTierValue && p.boost === topBoost);
+  // devolve na ordem original do shot list, pra bater com o TEMPLATE_7
+  return shotList.map((shot) => results[shot.role] || null);
+}
 
-    // 1ª geração (variacaoIdx=0): sempre a mais relevante/mais parecida com
-    // o papel. Embaralhar (variacaoIdx>0): varia só entre as empatadas.
-    const chosen = variacaoIdx === 0 ? tier[0] : tier[variacaoIdx % tier.length];
+// troca UMA foto específica (botão "Alterar imagem"): busca só o termo
+// pedido (ou o mesmo termo que gerou a foto atual, se for só "gerar
+// outra"), nunca combinado com o tema — mesma lógica de sempre, só que
+// escopada a 1 papel só. `excluirUrls` evita repetir fotos já mostradas
+// nessa célula durante a mesma sessão de troca.
+async function pickSingleShot(busca, role, excluirUrls, page, variacaoIdx) {
+  const shotDef = SHOT_LIST.find((s) => s.role === role) || { role, boostWords: [] };
+  const query = queryTerms(busca);
+  const keywords = themeKeywords(busca);
+  if (!keywords.length) return { error: "Escreva um termo de busca com pelo menos uma palavra específica." };
 
-    usedUrls.add(chosen.photo.url);
-    pingUnsplashDownload(chosen.photo);
-    const { _downloadLocation, ...clean } = chosen.photo;
-    return { role: shot.role, score: chosen.score, ...clean };
-  });
+  const pool = await collectRanked(query, keywords, page);
+  const relevant = pool.filter((p) => p.score > 0 && !excluirUrls.has(p.photo.url));
+  const ranked = rankCandidates(relevant, shotDef.boostWords);
+  const chosen = pickOne(ranked, new Set(), variacaoIdx);
+  if (!chosen) return { image: null };
+
+  return { image: finalizeImage(role, busca, chosen) };
 }
 
 // --- Handler ----------------------------------------------------------
@@ -416,6 +537,37 @@ export default async function handler(req, res) {
     return;
   }
 
+  const variacaoIdx = Math.max(0, (parseInt(req.query.variacao, 10) || 1) - 1);
+  const page = 1 + Math.floor(variacaoIdx / 3); // muda de página a cada 3 embaralhadas
+
+  // --- troca de UMA foto específica ("Alterar imagem" numa célula já
+  // gerada) — atalho que ignora o resto do board inteiro. Precisa de
+  // ?role=<papel> e usa ?busca=<termo> se enviado, senão ?tema= mesmo (pra
+  // "gerar outra" sem trocar o termo de busca). ?excluir=<url1,url2,...>
+  // evita repetir fotos já mostradas naquela célula.
+  const role = (req.query.role || "").toString().trim();
+  if (role) {
+    const busca = (req.query.busca || tema).toString().trim();
+    const excluirUrls = new Set(
+      (req.query.excluir || "")
+        .toString()
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+    try {
+      const result = await pickSingleShot(busca, role, excluirUrls, page, variacaoIdx);
+      if (result.error) {
+        res.status(400).json({ error: result.error });
+        return;
+      }
+      res.status(200).json({ role, image: result.image });
+    } catch (err) {
+      res.status(502).json({ error: err.message || "Falha ao buscar foto" });
+    }
+    return;
+  }
+
   const keywords = themeKeywords(tema);
   if (!keywords.length) {
     res.status(400).json({ error: "Escreva um tema com pelo menos uma palavra específica." });
@@ -423,14 +575,20 @@ export default async function handler(req, res) {
   }
   const temaQuery = queryTerms(tema);
 
-  const variacaoIdx = Math.max(0, (parseInt(req.query.variacao, 10) || 1) - 1);
-  const page = 1 + Math.floor(variacaoIdx / 3); // muda de página a cada 3 embaralhadas
+  // elementos específicos (opcional): lista separada por vírgula, ex:
+  // "pipoca, algodão doce" — cada um vira a busca de um papel do board.
+  const elementos = (req.query.elementos || "")
+    .toString()
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const shotList = buildShotList(elementos);
 
   try {
-    const picked = await pickAllShots(temaQuery, keywords, page, variacaoIdx);
+    const picked = await pickAllShots(tema, temaQuery, keywords, page, variacaoIdx, shotList);
 
     const images = picked.filter(Boolean);
-    const faltando = SHOT_LIST.length - images.length;
+    const faltando = shotList.length - images.length;
 
     res.status(200).json({
       tema,

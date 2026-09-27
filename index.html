@@ -32,21 +32,27 @@
     font-family:'Fraunces',serif;font-weight:600;
     font-size:clamp(24px,4vw,34px);margin:0 0 8px;
   }
-  p.sub{margin:0 0 22px;color:var(--ink-soft);font-size:14px;max-width:60ch}
+  p.sub{margin:0 0 18px;color:var(--ink-soft);font-size:14px;max-width:60ch}
 
-  form{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px}
+  form{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .campo{display:flex;flex-direction:column;gap:4px;flex:1;min-width:220px}
+  .campo label{font-size:11px;color:var(--ink-soft);letter-spacing:.02em}
   input[type=text]{
-    flex:1;min-width:220px;
+    width:100%;
     padding:14px 16px;border:1px solid #d8cfc2;border-radius:6px;
     font-size:15px;font-family:inherit;background:var(--card);color:var(--ink);
   }
+  .form-botoes{display:flex;gap:10px;align-items:flex-end}
   button{
     padding:14px 20px;border:none;border-radius:6px;
     background:var(--ink);color:#fff;font-family:inherit;font-size:14px;font-weight:600;
-    cursor:pointer;
+    cursor:pointer;white-space:nowrap;
   }
   button.secondary{background:transparent;color:var(--ink);border:1px solid #d8cfc2}
+  button.mini{padding:8px 12px;font-size:12px;border-radius:5px}
   button:disabled{opacity:.5;cursor:wait}
+
+  p.hint{margin:0 0 22px;color:var(--ink-soft);font-size:12px}
 
   .board{
     position:relative;width:100%;aspect-ratio:16/9;
@@ -54,6 +60,27 @@
   }
   .cell{position:absolute;overflow:hidden;background:#00000010}
   .cell img{width:100%;height:100%;object-fit:cover;display:block}
+
+  .cell .alterar-btn{
+    position:absolute;right:8px;top:8px;
+    background:rgba(20,16,12,.72);color:#fff;border:none;
+    font-family:inherit;font-size:11px;font-weight:600;
+    padding:7px 10px;border-radius:5px;cursor:pointer;
+    opacity:0;transition:opacity .15s ease;
+  }
+  .cell:hover .alterar-btn, .cell.editando .alterar-btn{opacity:1}
+
+  .painel-troca{
+    position:absolute;inset:0;background:rgba(20,16,12,.86);
+    display:flex;flex-direction:column;gap:8px;justify-content:center;
+    padding:14px;color:#fff;
+  }
+  .painel-troca input[type=text]{
+    padding:9px 10px;border-radius:5px;border:1px solid #6b6259;
+    font-size:13px;background:#fff;color:var(--ink);
+  }
+  .painel-troca .linha{display:flex;gap:6px}
+  .painel-troca .msg{font-size:11px;color:#e7ddcf;min-height:14px}
 
   .status{font-size:13px;color:var(--ink-soft);margin:14px 0}
   .credits{margin-top:14px;font-size:11px;color:var(--ink-soft);line-height:1.7}
@@ -65,7 +92,8 @@
   }
   @media (max-width:520px){
     form{flex-direction:column}
-    button{width:100%}
+    .form-botoes{width:100%}
+    .form-botoes button{flex:1}
   }
 </style>
 </head>
@@ -73,13 +101,23 @@
 <div class="wrap">
   <p class="eyebrow">Sistema de moodboards · Rachel Patrocínio</p>
   <h1>Gerador de moodboard</h1>
-  <p class="sub">Escreva um tema e o sistema busca 7 fotos reais de banco de imagens (Unsplash) e monta o board no mesmo formato bento dos moodboards de referência. Sem IA, sem custo.</p>
+  <p class="sub">Escreva um tema e o sistema busca 7 fotos reais de banco de imagens (Unsplash, Pexels, Pixabay) e monta o board no mesmo formato bento dos moodboards de referência. Sem IA, sem custo.</p>
 
   <form id="f">
-    <input type="text" id="tema" placeholder='Ex: "feira de natal", "loja de plantas", "coworking"' required />
-    <button type="submit" id="btnGerar">Gerar moodboard</button>
-    <button type="button" id="btnEmbaralhar" class="secondary" style="display:none">Embaralhar fotos</button>
+    <div class="campo">
+      <label for="tema">Tema</label>
+      <input type="text" id="tema" placeholder='Ex: "feira de natal", "loja de plantas", "coworking"' required />
+    </div>
+    <div class="campo">
+      <label for="elementos">Elementos específicos (opcional)</label>
+      <input type="text" id="elementos" placeholder='Ex: "pipoca, algodão doce"' />
+    </div>
+    <div class="form-botoes">
+      <button type="submit" id="btnGerar">Gerar moodboard</button>
+      <button type="button" id="btnEmbaralhar" class="secondary" style="display:none">Embaralhar fotos</button>
+    </div>
   </form>
+  <p class="hint">Elementos específicos: cada item da lista (separado por vírgula) vira uma foto própria no board, além do tema geral.</p>
 
   <div id="status" class="status"></div>
   <div id="output"></div>
@@ -88,6 +126,7 @@
 <script>
   const form = document.getElementById('f');
   const temaInput = document.getElementById('tema');
+  const elementosInput = document.getElementById('elementos');
   const btnGerar = document.getElementById('btnGerar');
   const btnEmbaralhar = document.getElementById('btnEmbaralhar');
   const statusEl = document.getElementById('status');
@@ -101,19 +140,114 @@
   // com qualquer coisa)
   const ROLE_ORDER = ['ambiente', 'produto1', 'textura', 'acao', 'detalhe', 'produto2', 'atmosfera'];
 
+  // estado do board atual: tema + um mapa role -> { ...dadosDaFoto, tried: Set<url> }
+  // "tried" guarda as urls já mostradas naquela célula nessa sessão, pra
+  // "Gerar outra" nunca repetir a mesma foto.
+  let state = { tema: '', images: {} };
+
   function pct(n){ return (n*100).toFixed(2) + '%'; }
 
+  function renderCredits(){
+    const list = ROLE_ORDER.map((r) => state.images[r]).filter(Boolean).filter((x) => x.creditUrl);
+    const credits = document.getElementById('credits-line');
+    if (!credits) return;
+    credits.innerHTML = 'Fotos: ' + list
+      .map((x) => `<a href="${x.creditUrl}" target="_blank" rel="noopener">${x.credit}</a> (${x.source})`)
+      .join(', ') + '.';
+  }
+
+  function fecharPainel(cell){
+    const painel = cell.querySelector('.painel-troca');
+    if (painel) painel.remove();
+    cell.classList.remove('editando');
+  }
+
+  function abrirPainel(cell, role){
+    // fecha qualquer outro painel aberto antes de abrir este
+    document.querySelectorAll('.cell.editando').forEach((c) => { if (c !== cell) fecharPainel(c); });
+    if (cell.querySelector('.painel-troca')) return;
+
+    cell.classList.add('editando');
+    const painel = document.createElement('div');
+    painel.className = 'painel-troca';
+    painel.innerHTML = `
+      <input type="text" placeholder="Buscar algo específico pra esta foto (ex: pipoca)" />
+      <div class="linha">
+        <button type="button" class="mini btn-buscar">Buscar</button>
+        <button type="button" class="mini secondary btn-outra" style="color:#fff;border-color:#8a8175">Gerar outra</button>
+        <button type="button" class="mini secondary btn-cancelar" style="color:#fff;border-color:#8a8175">Cancelar</button>
+      </div>
+      <div class="msg"></div>
+    `;
+    cell.appendChild(painel);
+
+    const input = painel.querySelector('input');
+    const msg = painel.querySelector('.msg');
+    const btnBuscar = painel.querySelector('.btn-buscar');
+    const btnOutra = painel.querySelector('.btn-outra');
+    const btnCancelar = painel.querySelector('.btn-cancelar');
+
+    btnCancelar.addEventListener('click', () => fecharPainel(cell));
+
+    async function trocar(busca, resetTried){
+      msg.textContent = 'Buscando...';
+      btnBuscar.disabled = true;
+      btnOutra.disabled = true;
+      try {
+        const atual = state.images[role];
+        if (resetTried) atual.tried = new Set();
+        const excluir = Array.from(atual.tried || []).join(',');
+        const url = `/api/moodboard?tema=${encodeURIComponent(state.tema)}&role=${encodeURIComponent(role)}` +
+          `&busca=${encodeURIComponent(busca)}&excluir=${encodeURIComponent(excluir)}&variacao=1`;
+        const r = await fetch(url);
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Erro desconhecido');
+        if (!data.image) {
+          msg.textContent = 'Nenhuma foto relevante encontrada pra esse termo.';
+          return;
+        }
+        data.image.tried = new Set([...(atual.tried || []), data.image.url]);
+        state.images[role] = data.image;
+        const img = cell.querySelector('img');
+        img.src = data.image.url;
+        img.alt = data.image.alt || busca;
+        renderCredits();
+        fecharPainel(cell);
+      } catch (err) {
+        msg.textContent = 'Erro: ' + err.message;
+      } finally {
+        btnBuscar.disabled = false;
+        btnOutra.disabled = false;
+      }
+    }
+
+    btnBuscar.addEventListener('click', () => {
+      const termo = input.value.trim();
+      if (!termo) { msg.textContent = 'Escreva um termo de busca.'; return; }
+      trocar(termo, true);
+    });
+
+    btnOutra.addEventListener('click', () => {
+      const atual = state.images[role];
+      trocar(atual.query || state.tema, false);
+    });
+  }
+
   function render(data){
+    state.tema = data.tema;
+    state.images = {};
+    data.images.forEach((img) => {
+      img.tried = new Set([img.url]);
+      state.images[img.role] = img;
+    });
+
     output.innerHTML = '';
     const board = document.createElement('div');
     board.className = 'board';
 
-    const byRole = {};
-    data.images.forEach(img => { byRole[img.role] = img; });
-
     data.template.forEach((slot, i) => {
       const role = ROLE_ORDER[i];
-      const img = byRole[role];
+      const img = state.images[role];
       const cell = document.createElement('div');
       cell.className = 'cell';
       cell.style.left = pct(slot.left);
@@ -125,6 +259,13 @@
         el.src = img.url;
         el.alt = img.alt || data.tema;
         cell.appendChild(el);
+
+        const btnAlterar = document.createElement('button');
+        btnAlterar.type = 'button';
+        btnAlterar.className = 'alterar-btn';
+        btnAlterar.textContent = 'Alterar imagem';
+        btnAlterar.addEventListener('click', () => abrirPainel(cell, role));
+        cell.appendChild(btnAlterar);
       } else {
         cell.style.display = 'flex';
         cell.style.alignItems = 'center';
@@ -133,7 +274,7 @@
         cell.style.color = 'var(--ink-soft)';
         cell.style.textAlign = 'center';
         cell.style.padding = '8px';
-        cell.textContent = 'Sem foto relevante o bastante pra este tema';
+        cell.textContent = 'Sem foto relevante o bastante pra este papel';
       }
       board.appendChild(cell);
     });
@@ -143,27 +284,27 @@
     if (data.faltando > 0) {
       const warn = document.createElement('p');
       warn.className = 'status';
-      warn.textContent = `${data.faltando} de 7 fotos ficaram sem imagem relevante o bastante — tente um tema mais específico ou clique em Embaralhar.`;
+      warn.textContent = `${data.faltando} de ${data.images.length + data.faltando} fotos ficaram sem imagem relevante o bastante — tente um tema mais específico, clique em Embaralhar, ou use "Alterar imagem" pra buscar algo pra essa célula.`;
       output.appendChild(warn);
     }
 
     const credits = document.createElement('div');
     credits.className = 'credits';
-    credits.innerHTML = 'Fotos: ' + data.images
-      .filter(x => x.creditUrl)
-      .map(x => `<a href="${x.creditUrl}" target="_blank" rel="noopener">${x.credit}</a> (${x.source})`)
-      .join(', ') + '.';
+    credits.id = 'credits-line';
     output.appendChild(credits);
+    renderCredits();
 
     btnEmbaralhar.style.display = 'inline-block';
   }
 
-  async function gerar(tema, variacaoParam){
+  async function gerar(tema, elementos, variacaoParam){
     statusEl.textContent = 'Buscando fotos no banco de imagens...';
     btnGerar.disabled = true;
     btnEmbaralhar.disabled = true;
     try {
-      const r = await fetch(`/api/moodboard?tema=${encodeURIComponent(tema)}&variacao=${variacaoParam}`);
+      const params = new URLSearchParams({ tema, variacao: String(variacaoParam) });
+      if (elementos) params.set('elementos', elementos);
+      const r = await fetch(`/api/moodboard?${params.toString()}`);
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || 'Erro desconhecido');
       render(data);
@@ -180,12 +321,12 @@
   form.addEventListener('submit', (e) => {
     e.preventDefault();
     variacao = 1;
-    gerar(temaInput.value.trim(), variacao);
+    gerar(temaInput.value.trim(), elementosInput.value.trim(), variacao);
   });
 
   btnEmbaralhar.addEventListener('click', () => {
     variacao = variacao >= 3 ? 1 : variacao + 1;
-    gerar(temaInput.value.trim(), variacao);
+    gerar(temaInput.value.trim(), elementosInput.value.trim(), variacao);
   });
 </script>
 </body>

@@ -74,6 +74,27 @@ Abra o link, escreva um tema (ex: "feira de natal", "loja de plantas",
 **Embaralhar fotos** troca as imagens mantendo o mesmo tema, caso a primeira
 combinação não fique boa.
 
+## Elementos específicos
+
+No campo **"Elementos específicos"**, dá pra listar coisas pontuais que a
+Rachel quer garantir que apareçam no board, separadas por vírgula — por
+exemplo, pra um tema de "feira de anime": `pipoca, algodão doce`. Cada item
+da lista vira a busca de UMA foto própria do board (além das fotos do tema
+geral), sem interferir na busca das outras.
+
+## Trocar uma foto específica
+
+Depois que o board é gerado, passe o mouse sobre qualquer foto e clique em
+**"Alterar imagem"**. Abre um pequeno painel com duas opções:
+
+- **Escrever um termo de busca** (ex: "vitrine com roupas de frio") e clicar
+  em **Buscar** — troca só aquela foto por uma busca nova.
+- Clicar em **"Gerar outra"** sem escrever nada — sorteia outra foto
+  relevante pro mesmo assunto que já estava naquela célula, sem repetir a
+  que já apareceu ali durante essa sessão.
+
+Isso não regenera o board inteiro — só a célula clicada muda.
+
 ## Como funciona (sem IA)
 
 O arquivo `api/moodboard.js` roda no servidor do Vercel (função serverless,
