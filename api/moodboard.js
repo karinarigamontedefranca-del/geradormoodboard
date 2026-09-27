@@ -8,23 +8,32 @@
 //   PEXELS_API_KEY       -> grátis em https://www.pexels.com/api/
 //   PIXABAY_API_KEY      -> grátis em https://pixabay.com/api/docs/
 //
-// Se mais de uma estiver configurada, tenta na ordem Unsplash -> Pexels ->
-// Pixabay, e cai pra próxima quando uma busca não retornar nada relevante.
+// Se mais de uma estiver configurada, os resultados de todas são somados e
+// ranqueados juntos por relevância ao tema.
 //
 // RELEVÂNCIA: cada resultado é pontuado por quantas palavras do tema
 // aparecem na sua própria descrição/tags. Na primeira geração usamos sempre
 // o resultado mais relevante; a aleatoriedade (botão "Embaralhar") só entra
 // entre os resultados que também passaram no filtro de relevância — nunca
 // entre resultados fracos.
-
+//
+// IMPORTANTE: a busca que vai pras APIs é SÓ o tema (traduzido pra inglês),
+// nunca tema+sufixo. Colar um sufixo tipo "hands" ou "close up" na busca
+// (versão anterior deste arquivo) faz o próprio buscador do Unsplash/
+// Pexels/Pixabay perder o foco no tema e priorizar o sufixo — por isso
+// buscar só "coworking" no Unsplash dá resultado ótimo, mas "coworking
+// hands" traz qualquer foto de mão/perna digitando. Os "sufixos" abaixo
+// (boostWords) servem só de DESEMPATE interno pra decidir qual foto, DENTRE
+// as já filtradas como relevantes ao tema, cai em qual célula do grid —
+// nunca pra decidir se uma foto é relevante.
 const SHOT_LIST = [
-  { role: "ambiente", suffix: "ambiente loja" },
-  { role: "produto1", suffix: "close up" },
-  { role: "textura", suffix: "textura" },
-  { role: "acao", suffix: "mãos" },
-  { role: "detalhe", suffix: "detalhe" },
-  { role: "produto2", suffix: "vitrine" },
-  { role: "atmosfera", suffix: "decoração" },
+  { role: "ambiente", boostWords: ["interior", "room", "space", "indoor", "shop"] },
+  { role: "produto1", boostWords: ["closeup", "close", "product"] },
+  { role: "textura", boostWords: ["texture", "pattern", "material", "wood", "fabric", "surface"] },
+  { role: "acao", boostWords: ["hands", "hand", "typing", "working"] },
+  { role: "detalhe", boostWords: ["detail", "close"] },
+  { role: "produto2", boostWords: ["storefront", "sign", "entrance", "facade", "window", "display"] },
+  { role: "atmosfera", boostWords: ["decor", "decoration", "light", "plant", "cozy", "ambience"] },
 ];
 
 // mesmas proporções do template de 7 fotos (build_moodboard.py TEMPLATES[7])
@@ -50,11 +59,119 @@ function normalize(str) {
     .replace(/[̀-ͯ]/g, ""); // remove acentos
 }
 
-// palavras "de peso" do tema (ignora conectivos e palavras curtas demais)
+// Dicionário PT -> EN pra palavras comuns de tema de moodboard/vitrine.
+// Por quê: os bancos de imagem são indexados majoritariamente em inglês, e
+// várias palavras em português são AMBÍGUAS quando usadas cru na busca —
+// o caso que motivou isso foi "natal": bate tanto com "Christmas" quanto
+// com "Natal" a cidade litorânea do Rio Grande do Norte, então uma busca
+// por "feira de natal" trazia fotos de praia/rochedo (geolocalizadas na
+// cidade de Natal) como se fossem "relevantes". Traduzindo pra inglês antes
+// de buscar E de pontuar relevância, essa colisão de nomes desaparece,
+// porque "christmas" não é nome de nenhuma cidade.
+// Chaves sem acento (já é assim que o texto chega depois do normalize()).
+const PT_EN_DICT = {
+  natal: "christmas",
+  natalino: "christmas",
+  natalina: "christmas",
+  feira: "fair",
+  feirinha: "fair",
+  mercado: "market",
+  mercadinho: "market",
+  loja: "store",
+  lojinha: "store",
+  lojas: "stores",
+  vitrine: "storefront",
+  vitrines: "storefront",
+  decoracao: "decoration",
+  decoracoes: "decorations",
+  pascoa: "easter",
+  verao: "summer",
+  inverno: "winter",
+  primavera: "spring",
+  outono: "autumn",
+  praia: "beach",
+  festa: "party",
+  festas: "party",
+  festival: "festival",
+  aniversario: "birthday",
+  infantil: "kids",
+  criancas: "children",
+  crianca: "child",
+  pet: "pet",
+  pets: "pets",
+  livraria: "bookstore",
+  livros: "books",
+  livro: "book",
+  cafe: "coffee",
+  cafeteria: "cafe",
+  perfumaria: "perfumery",
+  perfume: "perfume",
+  moda: "fashion",
+  roupas: "clothes",
+  roupa: "clothing",
+  joalheria: "jewelry",
+  joias: "jewelry",
+  tecnologia: "technology",
+  gastronomia: "food",
+  doces: "sweets",
+  doce: "candy",
+  flores: "flowers",
+  flor: "flower",
+  plantas: "plants",
+  planta: "plant",
+  oktoberfest: "oktoberfest",
+  cerveja: "beer",
+  vinho: "wine",
+  casamento: "wedding",
+  formatura: "graduation",
+  coworking: "coworking",
+  esporte: "sport",
+  esportes: "sports",
+  outlet: "outlet",
+  arvore: "tree",
+  arvores: "trees",
+  luzes: "lights",
+  luz: "light",
+  presente: "gift",
+  presentes: "gifts",
+  anime: "anime",
+  animes: "anime",
+  halloween: "halloween",
+  fantasia: "costume",
+  fantasias: "costumes",
+  terror: "horror",
+  abobora: "pumpkin",
+  aboboras: "pumpkins",
+  neve: "snow",
+  cabana: "cabin",
+  pinheiro: "pine tree",
+};
+
+function translateWord(w) {
+  return PT_EN_DICT[w] || null;
+}
+
+// termos de busca de fato enviados às APIs: cada palavra do tema é trocada
+// pela tradução em inglês quando existe uma (bancos de imagem indexam
+// majoritariamente em inglês, então isso melhora a busca em geral, além de
+// resolver ambiguidades tipo "natal").
+function queryTerms(tema) {
+  return normalize(tema)
+    .split(/\s+/)
+    .filter((w) => w && !STOPWORDS.has(w)) // remove conectivos em PT (ex: "de")
+    .map((w) => translateWord(w) || w)
+    .join(" ");
+}
+
+// palavras "de peso" do tema (ignora conectivos e palavras curtas demais),
+// já traduzidas pra inglês quando há tradução conhecida — usar SÓ a
+// tradução (e não a palavra original) quando ela existe é o que evita a
+// foto de praia entrar pontuada como relevante pra "natal".
 function themeKeywords(tema) {
   return normalize(tema)
     .split(/\s+/)
-    .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
+    .filter((w) => w.length >= 3 && !STOPWORDS.has(w))
+    .map((w) => translateWord(w) || w);
 }
 
 // pontua um item pelo número de palavras do tema que aparecem no seu texto
@@ -80,7 +197,7 @@ async function searchUnsplash(query, keywords, page) {
 
   const url = new URL("https://api.unsplash.com/search/photos");
   url.searchParams.set("query", query);
-  url.searchParams.set("per_page", "20");
+  url.searchParams.set("per_page", "30");
   url.searchParams.set("orientation", "landscape");
   url.searchParams.set("content_filter", "high");
   if (page) url.searchParams.set("page", String(page));
@@ -115,7 +232,7 @@ async function searchPexels(query, keywords, page) {
 
   const url = new URL("https://api.pexels.com/v1/search");
   url.searchParams.set("query", query);
-  url.searchParams.set("per_page", "20");
+  url.searchParams.set("per_page", "30");
   url.searchParams.set("orientation", "landscape");
   if (page) url.searchParams.set("page", String(page));
 
@@ -148,7 +265,7 @@ async function searchPixabay(query, keywords, page) {
   url.searchParams.set("image_type", "photo");
   url.searchParams.set("orientation", "horizontal");
   url.searchParams.set("safesearch", "true");
-  url.searchParams.set("per_page", "20");
+  url.searchParams.set("per_page", "30");
   if (page) url.searchParams.set("page", String(page));
 
   const res = await fetch(url);
@@ -183,40 +300,53 @@ async function collectRanked(query, keywords, page) {
   return pools.filter(Boolean).flat();
 }
 
-// escolhe a melhor foto pra um "papel" do shot list, tentando primeiro
-// "{tema} {sufixo}" e caindo pro tema puro se nada relevante aparecer
-async function pickForShot(tema, keywords, shot, page, variacaoIdx) {
-  let pool = await collectRanked(`${tema} ${shot.suffix}`, keywords, page);
-
-  // exige pelo menos 1 palavra do tema batendo — senão tenta o tema puro
-  let relevant = pool.filter((p) => p.score > 0);
-  if (!relevant.length) {
-    pool = await collectRanked(tema, keywords, page);
-    relevant = pool.filter((p) => p.score > 0);
-  }
-
-  // nada relevante em lugar nenhum: melhor deixar vazio do que forçar foto
-  // sem nenhuma relação com o tema
-  if (!relevant.length) return null;
-
-  relevant.sort((a, b) => b.score - a.score);
-  const topScore = relevant[0].score;
-  const topTier = relevant.filter((p) => p.score === topScore);
-
-  // 1ª geração (variacaoIdx=0): sempre a foto mais relevante.
-  // Embaralhar (variacaoIdx>0): varia só entre as igualmente relevantes.
-  const chosen = variacaoIdx === 0
-    ? topTier[0]
-    : topTier[variacaoIdx % topTier.length];
-
-  const photo = chosen.photo;
+function pingUnsplashDownload(photo) {
   if (photo.source === "Unsplash" && photo._downloadLocation) {
     const key = process.env.UNSPLASH_ACCESS_KEY;
     const dl = photo._downloadLocation;
     fetch(`${dl}${dl.includes("?") ? "&" : "?"}client_id=${key}`).catch(() => {});
   }
-  const { _downloadLocation, ...clean } = photo;
-  return { role: shot.role, score: chosen.score, ...clean };
+}
+
+// busca UMA VEZ (por tema puro, sem sufixo) e distribui fotos DISTINTAS
+// entre os 7 papéis do shot list, usando os boostWords de cada papel só
+// pra escolher, dentre as fotos já relevantes ao tema, qual delas parece
+// mais com aquele tipo de plano (ambiente, textura, mãos, etc.) — nunca
+// pra decidir se a foto é relevante (isso já foi decidido pelo score>0).
+async function pickAllShots(temaQuery, keywords, page, variacaoIdx) {
+  const pool = await collectRanked(temaQuery, keywords, page);
+
+  // só entram no jogo fotos que batem com pelo menos 1 palavra real do
+  // tema — o resto fica de fora (melhor faltar foto que mostrar algo sem
+  // relação nenhuma com o tema)
+  const relevant = pool.filter((p) => p.score > 0);
+  if (!relevant.length) return SHOT_LIST.map(() => null);
+
+  const usedUrls = new Set();
+
+  return SHOT_LIST.map((shot) => {
+    const candidates = relevant
+      .filter((p) => !usedUrls.has(p.photo.url))
+      .map((p) => ({
+        ...p,
+        boost: p.score + relevanceScore(p.photo.alt || "", shot.boostWords),
+      }))
+      .sort((a, b) => b.boost - a.boost);
+
+    if (!candidates.length) return null;
+
+    const topBoost = candidates[0].boost;
+    const tier = candidates.filter((p) => p.boost === topBoost);
+
+    // 1ª geração (variacaoIdx=0): sempre a mais relevante/mais parecida com
+    // o papel. Embaralhar (variacaoIdx>0): varia só entre as empatadas.
+    const chosen = variacaoIdx === 0 ? tier[0] : tier[variacaoIdx % tier.length];
+
+    usedUrls.add(chosen.photo.url);
+    pingUnsplashDownload(chosen.photo);
+    const { _downloadLocation, ...clean } = chosen.photo;
+    return { role: shot.role, score: chosen.score, ...clean };
+  });
 }
 
 // --- Handler ----------------------------------------------------------
@@ -245,14 +375,13 @@ export default async function handler(req, res) {
     res.status(400).json({ error: "Escreva um tema com pelo menos uma palavra específica." });
     return;
   }
+  const temaQuery = queryTerms(tema);
 
   const variacaoIdx = Math.max(0, (parseInt(req.query.variacao, 10) || 1) - 1);
   const page = 1 + Math.floor(variacaoIdx / 3); // muda de página a cada 3 embaralhadas
 
   try {
-    const picked = await Promise.all(
-      SHOT_LIST.map((shot) => pickForShot(tema, keywords, shot, page, variacaoIdx))
-    );
+    const picked = await pickAllShots(temaQuery, keywords, page, variacaoIdx);
 
     const images = picked.filter(Boolean);
     const faltando = SHOT_LIST.length - images.length;

@@ -89,11 +89,48 @@ do moodboard:
 6. vitrine/produto 2
 7. atmosfera geral
 
-Cada busca é só `"{tema} " + sufixo fixo` (ex: `"feira de natal" ambiente
-interior loja`) — nenhuma etapa usa modelo de linguagem, é busca direta no
-banco de imagens. Isso é rápido e sem custo, mas também tem limite: pra
-temas muito nichados ou abstratos, a busca pode não achar fotos boas (o
-Unsplash não "entende" o tema, só casa palavras-chave). Pra esses casos o
+A busca que vai pras APIs é só o tema, traduzido pra inglês (ex: "feira de
+natal" vira `"fair christmas"`) — sem nenhuma palavra extra colada. Isso é
+proposital: colar um sufixo tipo "hands" ou "close up" na busca (uma
+versão anterior deste arquivo fazia isso pra tentar achar plano
+específico pra cada foto do board) faz o próprio buscador do Unsplash/
+Pexels/Pixabay perder o foco no tema — por isso buscar só "coworking"
+direto no Unsplash dá resultado ótimo, mas "coworking hands" traz
+qualquer foto de mão/perna digitando que bate frouxamente com a palavra
+"coworking" em algum canto da legenda.
+
+Por isso o sistema busca o tema puro UMA VEZ, pega um pool de fotos, filtra
+só as que batem com pelo menos uma palavra real do tema (isso garante que
+tudo que aparece é "muito relacionado com o tema") e só DEPOIS distribui
+7 fotos distintas (nunca repetidas) entre os papéis do board (ambiente,
+textura, mãos, vitrine, etc.) — usando um empurrão leve de palavras tipo
+"hands"/"texture"/"storefront" só pra decidir qual foto relevante fica em
+qual célula, nunca pra decidir se ela é relevante. Nenhuma etapa usa
+modelo de linguagem, é tudo regra fixa (um dicionário PT→EN e comparação
+de palavras), sem custo de token.
+
+**Por que traduzir pra inglês:** os bancos de imagem são indexados
+majoritariamente em inglês, e algumas palavras em português são
+*ambíguas* quando usadas cru na busca. O caso que apareceu nos testes:
+"natal" bate tanto com "Christmas" (o feriado) quanto com "Natal" — a
+cidade litorânea do Rio Grande do Norte — e isso fazia o sistema aceitar
+fotos de praia/rochedo como "relevantes" pra um moodboard de Natal, porque
+a foto estava só geolocalizada/marcada com o nome da cidade. Traduzindo
+"natal" → "christmas" antes de buscar e de pontuar relevância, essa
+colisão de nomes desaparece (não existe cidade chamada "Christmas").
+
+O dicionário (`PT_EN_DICT` em `api/moodboard.js`) cobre várias palavras
+comuns de tema de moodboard/vitrine (natal, feira, mercado, loja, páscoa,
+verão, halloween, oktoberfest, coworking, livraria, etc.). Pra palavras
+que não estão no dicionário, o sistema usa a palavra em português mesmo
+(ainda funciona, só que com menos garantia de bater com fotos indexadas
+em inglês). Se um tema novo continuar trazendo fotos fora do assunto,
+normalmente o ajuste é só acrescentar a palavra que faltou nesse
+dicionário — não precisa mexer no resto do código.
+
+Isso tem limite: pra temas muito nichados ou abstratos, ou palavras raras
+sem tradução no dicionário, a busca pode não achar fotos boas (o banco de
+imagens não "entende" o tema, só casa palavras-chave). Pra esses casos o
 próximo passo natural é adicionar uma etapa de IA que reescreve o tema em
 consultas melhores antes de buscar — aí sim entraria custo de token, mas
 só quando for necessário.
