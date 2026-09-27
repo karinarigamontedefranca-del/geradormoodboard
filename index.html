@@ -6,6 +6,8 @@
 <title>Gerador de Moodboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
 <style>
   :root{
     --bg:#F8F1EA;
@@ -96,6 +98,8 @@
   .painel-troca .msg{font-size:11px;color:#e7ddcf;min-height:14px}
 
   .status{font-size:13px;color:var(--ink-soft);margin:14px 0}
+  .download-bloco{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap}
+  .download-bloco .msg-download{font-size:12px;color:var(--ink-soft)}
   .credits{margin-top:14px;font-size:11px;color:var(--ink-soft);line-height:1.7}
   .credits a{color:var(--ink-soft)}
   .empty{
@@ -458,7 +462,148 @@
     output.appendChild(credits);
     renderCredits();
 
+    output.appendChild(criarBlocoDownload());
+
     btnEmbaralhar.style.display = 'inline-block';
+    state.currentRects = data.template;
+  }
+
+  // --- Download em PDF / PPTX ------------------------------------------
+  // Ambos os formatos são montados no NAVEGADOR (sem passar pelo servidor):
+  // cada foto do board (seja do banco de imagens, gerada por IA ou
+  // enviada do computador) é convertida pra base64 e posicionada no slide
+  // exatamente nas mesmas proporções do grid na tela, num slide/página
+  // 16:9 de 13.333 x 7.5 polegadas (tamanho padrão de slide widescreen).
+
+  const SLIDE_W_IN = 13.333;
+  const SLIDE_H_IN = 7.5;
+  const BG_COR = 'F8F1EA';
+
+  // baixa uma imagem (banco de imagens ou já data:) e devolve como data URI
+  // base64 — necessário pro jsPDF/PptxGenJS conseguirem embutir a imagem no
+  // arquivo (eles não conseguem só linkar uma URL remota).
+  async function paraDataUrl(url){
+    if (url.startsWith('data:')) return url;
+    const resp = await fetch(url, { mode: 'cors' });
+    if (!resp.ok) throw new Error('Não deu pra baixar a foto');
+    const blob = await resp.blob();
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Não deu pra ler a foto'));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function formatoDaDataUrl(dataUrl){
+    const m = /^data:image\/(png|jpe?g|webp)/i.exec(dataUrl);
+    if (!m) return 'JPEG';
+    const ext = m[1].toLowerCase();
+    if (ext === 'png') return 'PNG';
+    if (ext === 'webp') return 'PNG'; // jsPDF/pptxgenjs não têm WEBP; PNG aceita o mesmo base64 nos dois
+    return 'JPEG';
+  }
+
+  // monta a lista { rect, dataUrl, formato } de todas as células com foto,
+  // baixando cada foto em paralelo. Fotos que falharem (ex: bloqueio de
+  // CORS de algum provedor) são só puladas, e o total de puladas é avisado
+  // no fim.
+  async function montarCelulasParaExport(){
+    const rects = state.currentRects;
+    if (!rects) throw new Error('Gere um moodboard antes de baixar.');
+    const items = await Promise.all(state.roles.map(async (role, i) => {
+      const img = state.images[role];
+      if (!img) return null;
+      try {
+        const dataUrl = await paraDataUrl(img.url);
+        return { rect: rects[i], dataUrl, formato: formatoDaDataUrl(dataUrl) };
+      } catch (err) {
+        return { erro: true };
+      }
+    }));
+    const puladas = items.filter((it) => it && it.erro).length;
+    const celulas = items.filter((it) => it && !it.erro);
+    return { celulas, puladas };
+  }
+
+  function nomeArquivo(ext){
+    const base = (state.tema || 'moodboard').toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'moodboard';
+    return `moodboard-${base}.${ext}`;
+  }
+
+  async function baixarPdf(msgEl){
+    msgEl.textContent = 'Preparando PDF...';
+    try {
+      const { celulas, puladas } = await montarCelulasParaExport();
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'in', format: [SLIDE_W_IN, SLIDE_H_IN] });
+      doc.setFillColor(`#${BG_COR}`);
+      doc.rect(0, 0, SLIDE_W_IN, SLIDE_H_IN, 'F');
+      celulas.forEach(({ rect, dataUrl, formato }) => {
+        doc.addImage(
+          dataUrl, formato,
+          rect.left * SLIDE_W_IN, rect.top * SLIDE_H_IN,
+          rect.width * SLIDE_W_IN, rect.height * SLIDE_H_IN
+        );
+      });
+      doc.save(nomeArquivo('pdf'));
+      msgEl.textContent = puladas
+        ? `PDF baixado (${puladas} foto(s) não puderam ser incluídas).`
+        : 'PDF baixado.';
+    } catch (err) {
+      msgEl.textContent = 'Erro ao gerar PDF: ' + err.message;
+    }
+  }
+
+  async function baixarPptx(msgEl){
+    msgEl.textContent = 'Preparando PPTX...';
+    try {
+      const { celulas, puladas } = await montarCelulasParaExport();
+      const pptx = new window.PptxGenJS();
+      pptx.defineLayout({ name: 'MOODBOARD', width: SLIDE_W_IN, height: SLIDE_H_IN });
+      pptx.layout = 'MOODBOARD';
+      const slide = pptx.addSlide();
+      slide.background = { color: BG_COR };
+      celulas.forEach(({ rect, dataUrl }) => {
+        slide.addImage({
+          data: dataUrl,
+          x: rect.left * SLIDE_W_IN, y: rect.top * SLIDE_H_IN,
+          w: rect.width * SLIDE_W_IN, h: rect.height * SLIDE_H_IN,
+        });
+      });
+      await pptx.writeFile({ fileName: nomeArquivo('pptx') });
+      msgEl.textContent = puladas
+        ? `PPTX baixado (${puladas} foto(s) não puderam ser incluídas).`
+        : 'PPTX baixado.';
+    } catch (err) {
+      msgEl.textContent = 'Erro ao gerar PPTX: ' + err.message;
+    }
+  }
+
+  function criarBlocoDownload(){
+    const bloco = document.createElement('div');
+    bloco.className = 'download-bloco';
+    bloco.innerHTML = `
+      <button type="button" class="secondary mini" id="btnBaixarPdf">Baixar PDF</button>
+      <button type="button" class="secondary mini" id="btnBaixarPptx">Baixar PPTX</button>
+      <span class="msg-download"></span>
+    `;
+    const msgEl = bloco.querySelector('.msg-download');
+    const btnPdf = bloco.querySelector('#btnBaixarPdf');
+    const btnPptx = bloco.querySelector('#btnBaixarPptx');
+    btnPdf.addEventListener('click', async () => {
+      btnPdf.disabled = true; btnPptx.disabled = true;
+      await baixarPdf(msgEl);
+      btnPdf.disabled = false; btnPptx.disabled = false;
+    });
+    btnPptx.addEventListener('click', async () => {
+      btnPdf.disabled = true; btnPptx.disabled = true;
+      await baixarPptx(msgEl);
+      btnPdf.disabled = false; btnPptx.disabled = false;
+    });
+    return bloco;
   }
 
   async function gerar(tema, elementos, template, variacaoParam){

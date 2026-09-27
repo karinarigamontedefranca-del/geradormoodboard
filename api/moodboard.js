@@ -416,6 +416,32 @@ async function collectRanked(query, keywords, page) {
   return pools.filter(Boolean).flat();
 }
 
+// Busca páginas extras até ter fotos relevantes (score>0) suficientes pra
+// preencher `neededDistinct` papéis, ou até esgotar o limite de páginas.
+// Por quê: antes, o board inteiro (todos os papéis genéricos) dividia um
+// único pool de 1 página (30 fotos por provedor) — em temas mais
+// específicos, ou nos templates de 8/9 fotos (mais papéis pra preencher),
+// esse pool ficava sem fotos "relevantes o bastante" sobrando antes de
+// cobrir todos os papéis, e a célula ficava vazia ("faltando uma foto no
+// canto"). Buscando páginas extras sob demanda, o pool cresce só quando
+// necessário.
+const MAX_EXTRA_PAGES = 2;
+async function collectRankedDeep(query, keywords, startPage, neededDistinct) {
+  const seen = new Set();
+  const merged = [];
+  for (let i = 0; i <= MAX_EXTRA_PAGES; i++) {
+    const batch = await collectRanked(query, keywords, startPage + i);
+    for (const item of batch) {
+      if (seen.has(item.photo.url)) continue;
+      seen.add(item.photo.url);
+      merged.push(item);
+    }
+    const distinctRelevant = merged.reduce((n, p) => (p.score > 0 ? n + 1 : n), 0);
+    if (distinctRelevant >= neededDistinct) break;
+  }
+  return merged;
+}
+
 function pingUnsplashDownload(photo) {
   if (photo.source === "Unsplash" && photo._downloadLocation) {
     const key = process.env.UNSPLASH_ACCESS_KEY;
@@ -517,9 +543,16 @@ async function pickAllShots(tema, temaQuery, keywords, page, variacaoIdx, shotLi
   for (const shot of elementShots) {
     const elQuery = queryTerms(shot.elemento);
     const elKeywords = themeKeywords(shot.elemento);
-    const pool = elKeywords.length ? await collectRanked(elQuery, elKeywords, page) : [];
+    const pool = elKeywords.length ? await collectRankedDeep(elQuery, elKeywords, page, 1) : [];
     const relevant = rankCandidates(pool.filter((p) => p.score > 0), shot.boostWords);
-    const chosen = pickOne(relevant, usedUrls, variacaoIdx);
+    let chosen = pickOne(relevant, usedUrls, variacaoIdx);
+    // fallback: nenhuma foto bateu o filtro de relevância mesmo com páginas
+    // extras — melhor preencher com a foto menos ruim do pool inteiro do que
+    // deixar essa célula vazia
+    if (!chosen && pool.length) {
+      const anyRanked = rankCandidates(pool, shot.boostWords);
+      chosen = pickOne(anyRanked, usedUrls, variacaoIdx);
+    }
     if (chosen) {
       usedUrls.add(chosen.photo.url);
       results[shot.role] = finalizeImage(shot.role, shot.elemento, chosen);
@@ -528,16 +561,22 @@ async function pickAllShots(tema, temaQuery, keywords, page, variacaoIdx, shotLi
     }
   }
 
-  // 2) papéis genéricos, todos a partir de UMA busca pelo tema
+  // 2) papéis genéricos, todos a partir de UMA busca pelo tema (com páginas
+  // extras sob demanda, ver collectRankedDeep)
   if (genericShots.length) {
-    const pool = await collectRanked(temaQuery, keywords, page);
+    const pool = await collectRankedDeep(temaQuery, keywords, page, genericShots.length);
     const relevant = pool.filter((p) => p.score > 0);
     for (const shot of genericShots) {
-      const ranked = rankCandidates(
-        relevant.filter((p) => !usedUrls.has(p.photo.url)),
-        shot.boostWords
-      );
-      const chosen = pickOne(ranked, usedUrls, variacaoIdx);
+      const disponiveis = pool.filter((p) => !usedUrls.has(p.photo.url));
+      const relevantesDisponiveis = relevant.filter((p) => !usedUrls.has(p.photo.url));
+      const ranked = rankCandidates(relevantesDisponiveis, shot.boostWords);
+      let chosen = pickOne(ranked, usedUrls, variacaoIdx);
+      // mesmo fallback: sem foto relevante sobrando pra esse papel, usa a
+      // melhor disponível do pool inteiro em vez de deixar buraco no grid
+      if (!chosen && disponiveis.length) {
+        const anyRanked = rankCandidates(disponiveis, shot.boostWords);
+        chosen = pickOne(anyRanked, usedUrls, variacaoIdx);
+      }
       if (chosen) {
         usedUrls.add(chosen.photo.url);
         results[shot.role] = finalizeImage(shot.role, tema, chosen);
@@ -562,10 +601,15 @@ async function pickSingleShot(busca, role, excluirUrls, page, variacaoIdx) {
   const keywords = themeKeywords(busca);
   if (!keywords.length) return { error: "Escreva um termo de busca com pelo menos uma palavra específica." };
 
-  const pool = await collectRanked(query, keywords, page);
+  const pool = await collectRankedDeep(query, keywords, page, 1);
   const relevant = pool.filter((p) => p.score > 0 && !excluirUrls.has(p.photo.url));
   const ranked = rankCandidates(relevant, shotDef.boostWords);
-  const chosen = pickOne(ranked, new Set(), variacaoIdx);
+  let chosen = pickOne(ranked, new Set(), variacaoIdx);
+  if (!chosen) {
+    const anyLeft = pool.filter((p) => !excluirUrls.has(p.photo.url));
+    const anyRanked = rankCandidates(anyLeft, shotDef.boostWords);
+    chosen = pickOne(anyRanked, new Set(), variacaoIdx);
+  }
   if (!chosen) return { image: null };
 
   return { image: finalizeImage(role, busca, chosen) };

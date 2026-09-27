@@ -126,6 +126,30 @@ Trocar de template muda quantas fotos o board tem e o formato da grade —
 o resto (elementos específicos, alterar imagem, IA) funciona igual em
 qualquer um deles.
 
+### Sobre células vazias ("Sem foto relevante o bastante")
+
+O sistema busca páginas extras de fotos automaticamente quando o tema tem
+poucos resultados relevantes (isso evitava, antes, que templates maiores
+como o de 8/9 fotos deixassem um canto do board sem imagem). Se mesmo assim
+sobrar alguma célula vazia — tema bem nichado, poucos resultados nos bancos
+de imagem — ainda dá pra clicar em **"Alterar imagem"** naquela célula e
+buscar um termo mais específico, gerar outra, subir uma foto do computador
+ou gerar com IA.
+
+## Baixar o moodboard em PDF ou PPTX
+
+Depois de gerar um board, aparecem dois botões abaixo dele: **"Baixar
+PDF"** e **"Baixar PPTX"**. Os dois são montados direto no navegador (sem
+passar pelo servidor): cada foto do board — do banco de imagens, gerada por
+IA ou enviada do computador — é baixada e embutida no arquivo, na mesma
+posição e tamanho da célula na tela, num slide 16:9 com o fundo
+`#F8F1EA`. O PPTX abre pronto pra editar no PowerPoint/Google Slides; o PDF
+é só pra visualizar/imprimir.
+
+Se alguma foto de banco de imagens não puder ser baixada pelo navegador
+(bloqueio de CORS raro em algum provedor), ela é só pulada e o aviso final
+diz quantas ficaram de fora — o resto do arquivo sai normal.
+
 ## Geração por IA (OpenAI) — opcional, tem custo real
 
 Além da busca gratuita em banco de imagens, dá pra gerar fotos com a API
