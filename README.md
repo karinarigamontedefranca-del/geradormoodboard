@@ -103,11 +103,43 @@ Por isso o sistema busca o tema puro UMA VEZ, pega um pool de fotos, filtra
 só as que batem com pelo menos uma palavra real do tema (isso garante que
 tudo que aparece é "muito relacionado com o tema") e só DEPOIS distribui
 7 fotos distintas (nunca repetidas) entre os papéis do board (ambiente,
-textura, mãos, vitrine, etc.) — usando um empurrão leve de palavras tipo
-"hands"/"texture"/"storefront" só pra decidir qual foto relevante fica em
-qual célula, nunca pra decidir se ela é relevante. Nenhuma etapa usa
-modelo de linguagem, é tudo regra fixa (um dicionário PT→EN e comparação
-de palavras), sem custo de token.
+textura, mãos, vitrine, etc.). Nenhuma etapa usa modelo de linguagem, é
+tudo regra fixa (um dicionário PT→EN e comparação de palavras), sem custo
+de token.
+
+**Desempate (qual foto relevante cai em qual papel):** depois de garantir
+que a foto é relevante ao tema, três critérios decidem qual foto específica
+é escolhida pra cada papel, nessa ordem:
+1. **Fonte**: Unsplash e Pexels sempre antes do Pixabay. O Pixabay tende a
+   ter fotografia mais datada/corporativa, e tem o hábito de colocar
+   dezenas de tags repetidas na mesma foto (`"office, office, office..."`),
+   o que inflava artificialmente o desempate a favor dele numa versão
+   anterior — por isso fotos do Unsplash não apareciam nunca, mesmo
+   configurado. Agora o Pixabay só entra quando sobra papel sem foto boa o
+   suficiente do Unsplash/Pexels.
+2. **Estilo editorial**: um pequeno reforço pra legendas que mencionam
+   interior/arquitetura/plantas/madeira/luz natural (o padrão visual das
+   referências da Rachel) e um pequeno desconto pra legendas com cara de
+   banco de imagens genérico ("digital nomad", "freelancer", "portrait",
+   etc.) — isso não filtra nada, só desempata a favor do visual mais
+   parecido com o de referência quando há mais de uma foto relevante.
+3. **Tipo de plano**: um empurrão leve de palavras tipo "hands"/"texture"/
+   "storefront" pra aproximar cada foto do tipo de plano do seu papel no
+   grid (ambiente, textura, mãos, vitrine, etc.).
+
+Nenhum desses três critérios conta pontos por palavra repetida (é sim/não,
+no máximo 1 ponto por critério) — assim uma legenda com uma lista gigante
+de tags não vence só por ter mais chance de bater em alguma palavra.
+
+**Limite importante:** filtrar por palavra-chave garante que a foto é
+sobre o tema certo, mas não garante o estilo fotográfico exato (o reforço
+de estilo do item 2 ajuda, mas é uma pista textual, não visual — o sistema
+não "vê" a foto, só lê a legenda/tags dela). Pra temas onde a maioria das
+fotos disponíveis nos bancos gratuitos for de um estilo bem diferente do de
+referência, pode sobrar pouca opção editorial e alguma foto mais genérica
+ainda aparecer. Se isso acontecer bastante, o próximo passo natural seria
+uma etapa de IA que descreva o estilo visual desejado antes de buscar —
+mas aí entraria custo de token.
 
 **Por que traduzir pra inglês:** os bancos de imagem são indexados
 majoritariamente em inglês, e algumas palavras em português são

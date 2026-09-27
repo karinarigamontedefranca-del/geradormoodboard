@@ -36,6 +36,27 @@ const SHOT_LIST = [
   { role: "atmosfera", boostWords: ["decor", "decoration", "light", "plant", "cozy", "ambience"] },
 ];
 
+// Reforço de ESTILO (não de tema): aplicado em toda foto, de todo papel, não
+// só num específico. É o que aproxima do padrão visual das referências da
+// Rachel (fotografia editorial de arquitetura/interior — plantas, madeira,
+// luz natural, poucas ou nenhuma pessoa em close) em vez de foto de banco
+// de imagens genérica de gente sorrindo pro computador. Isso NÃO restringe
+// o tema (uma foto sem nenhuma dessas palavras ainda pode ser escolhida se
+// não houver opção melhor) — só desempata a favor do visual mais editorial
+// quando há mais de uma foto igualmente relevante ao tema.
+const STYLE_BOOST_WORDS = [
+  "interior", "architecture", "design", "plant", "plants", "wood", "wooden",
+  "natural light", "minimal", "aesthetic", "cozy", "botanical", "greenery",
+];
+
+// palavras que costumam indicar foto de banco de imagens genérica/pose de
+// still de "trabalho remoto" (a antítese do editorial) — usado como um
+// PEQUENO desconto na pontuação de desempate, não como exclusão.
+const GENERIC_STOCK_WORDS = [
+  "digital nomad", "freelancer", "smiling", "portrait", "businessman",
+  "businesswoman", "stock photo",
+];
+
 // mesmas proporções do template de 7 fotos (build_moodboard.py TEMPLATES[7])
 const TEMPLATE_7 = [
   { left: 0.0, top: 0.0, width: 0.266, height: 1.0 },
@@ -308,11 +329,28 @@ function pingUnsplashDownload(photo) {
   }
 }
 
+// Unsplash/Pexels entram sempre antes do Pixabay: o Pixabay tende a ter
+// fotografia mais datada/corporativa E listas de tags repetidas dezenas de
+// vezes (ex: "office, office, office...") que, se contadas cru, inflam
+// artificialmente o desempate a favor dele. Tier 0 = tentamos usar só
+// essas fontes primeiro; o Pixabay (tier 1) só entra pra completar o que
+// faltar.
+function providerTier(source) {
+  return source === "Pixabay" ? 1 : 0;
+}
+
 // busca UMA VEZ (por tema puro, sem sufixo) e distribui fotos DISTINTAS
-// entre os 7 papéis do shot list, usando os boostWords de cada papel só
-// pra escolher, dentre as fotos já relevantes ao tema, qual delas parece
-// mais com aquele tipo de plano (ambiente, textura, mãos, etc.) — nunca
-// pra decidir se a foto é relevante (isso já foi decidido pelo score>0).
+// entre os 7 papéis do shot list. O desempate combina três coisas, nessa
+// ordem de prioridade:
+//   1. fonte (Unsplash/Pexels antes de Pixabay, ver providerTier)
+//   2. estilo editorial (STYLE_BOOST_WORDS) menos "cara de stock genérico"
+//      (GENERIC_STOCK_WORDS) — aproxima do visual das referências da Rachel
+//   3. o quanto a legenda bate com o tipo de plano daquele papel (boostWords)
+// Nada disso decide SE a foto é relevante ao tema — isso já foi decidido
+// pelo score>0 (linha abaixo). E o "match" de cada lista de palavras é
+// tratado como sim/não (no máx. +1), nunca somando 1 ponto por palavra
+// repetida — é isso que impede uma legenda com dezenas de tags de vencer
+// só por ter mais chance de bater em alguma palavra.
 async function pickAllShots(temaQuery, keywords, page, variacaoIdx) {
   const pool = await collectRanked(temaQuery, keywords, page);
 
@@ -327,16 +365,24 @@ async function pickAllShots(temaQuery, keywords, page, variacaoIdx) {
   return SHOT_LIST.map((shot) => {
     const candidates = relevant
       .filter((p) => !usedUrls.has(p.photo.url))
-      .map((p) => ({
-        ...p,
-        boost: p.score + relevanceScore(p.photo.alt || "", shot.boostWords),
-      }))
-      .sort((a, b) => b.boost - a.boost);
+      .map((p) => {
+        const alt = p.photo.alt || "";
+        const styleHit = relevanceScore(alt, STYLE_BOOST_WORDS) > 0 ? 1 : 0;
+        const genericHit = relevanceScore(alt, GENERIC_STOCK_WORDS) > 0 ? 1 : 0;
+        const roleHit = relevanceScore(alt, shot.boostWords) > 0 ? 1 : 0;
+        return {
+          ...p,
+          tier: providerTier(p.photo.source),
+          boost: styleHit - genericHit + roleHit,
+        };
+      })
+      .sort((a, b) => a.tier - b.tier || b.boost - a.boost);
 
     if (!candidates.length) return null;
 
-    const topBoost = candidates[0].boost;
-    const tier = candidates.filter((p) => p.boost === topBoost);
+    const topTierValue = candidates[0].tier;
+    const topBoost = candidates.find((p) => p.tier === topTierValue).boost;
+    const tier = candidates.filter((p) => p.tier === topTierValue && p.boost === topBoost);
 
     // 1ª geração (variacaoIdx=0): sempre a mais relevante/mais parecida com
     // o papel. Embaralhar (variacaoIdx>0): varia só entre as empatadas.
