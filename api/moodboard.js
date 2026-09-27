@@ -32,7 +32,13 @@ const ROLE_LIBRARY = [
   { role: "ambiente", boostWords: ["interior", "room", "space", "indoor", "shop"] },
   { role: "produto1", boostWords: ["closeup", "close", "product"] },
   { role: "textura", boostWords: ["texture", "pattern", "material", "wood", "fabric", "surface"] },
-  { role: "acao", boostWords: ["hands", "hand", "typing", "working"] },
+  // Antes tinha "hands"/"typing" aqui — isso ativamente puxava fotos de mão
+  // digitando pro papel "ação" (contradizendo o guia de estilo, que pede
+  // "objeto em uso, sem mão/pessoa"), e o pior: cancelava o desconto do
+  // GENERIC_STOCK_WORDS (mesma foto batendo +1 aqui e -1 lá = 0 líquido,
+  // como se fosse uma foto neutra). Agora o papel busca objeto em uso/
+  // deslocado, sem magnetizar foto de gente.
+  { role: "acao", boostWords: ["open", "unboxed", "unpacked", "in use", "half open"] },
   { role: "detalhe", boostWords: ["detail", "close"] },
   { role: "produto2", boostWords: ["storefront", "sign", "entrance", "facade", "window", "display"] },
   { role: "atmosfera", boostWords: ["decor", "decoration", "light", "plant", "cozy", "ambience"] },
@@ -59,7 +65,9 @@ const STYLE_BOOST_WORDS = [
 // PEQUENO desconto na pontuação de desempate, não como exclusão.
 const GENERIC_STOCK_WORDS = [
   "digital nomad", "freelancer", "smiling", "portrait", "businessman",
-  "businesswoman", "stock photo",
+  "businesswoman", "stock photo", "hands", "hand", "typing", "fingers",
+  "person typing", "woman working", "man working", "top view desk",
+  "flat lay desk",
 ];
 
 // Proporções de cada template — calibradas visualmente a partir dos
@@ -501,7 +509,13 @@ function rankCandidates(pool, boostWords) {
       const styleHit = relevanceScore(alt, STYLE_BOOST_WORDS) > 0 ? 1 : 0;
       const genericHit = relevanceScore(alt, GENERIC_STOCK_WORDS) > 0 ? 1 : 0;
       const roleHit = relevanceScore(alt, boostWords) > 0 ? 1 : 0;
-      return { ...p, tier: providerTier(p.photo.source), boost: styleHit - genericHit + roleHit };
+      // genericHit pesa o dobro do styleHit: sem isso, uma foto de "mão
+      // digitando numa mesa de madeira" batia +1 em STYLE_BOOST_WORDS
+      // ("wood") e -1 em GENERIC_STOCK_WORDS ("hands"), empatando em 0 com
+      // uma foto totalmente neutra — nunca perdendo por ser "gente
+      // trabalhando". Com o peso dobrado, essa mesma foto fica em -1,
+      // atrás de qualquer alternativa neutra ou editorial disponível.
+      return { ...p, tier: providerTier(p.photo.source), boost: styleHit - genericHit * 2 + roleHit };
     })
     .sort((a, b) => a.tier - b.tier || b.boost - a.boost);
 }
