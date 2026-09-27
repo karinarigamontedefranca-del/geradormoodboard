@@ -1,24 +1,49 @@
 # Gerador de Moodboard — grátis, sem IA
 
-Site com um campo de texto: você escreve um tema, ele busca 7 fotos reais no
-Unsplash (banco de imagens gratuito) e monta o board no formato bento dos
-moodboards de referência (a mesma grade assimétrica: 1 foto grande, colunas
-divididas em cima/baixo, respiro fino entre as fotos).
+Site com um campo de texto: você escreve um tema, ele busca 7 fotos reais em
+bancos de imagens gratuitos (Unsplash e/ou Pexels) e monta o board no
+formato bento dos moodboards de referência (a mesma grade assimétrica: 1
+foto grande, colunas divididas em cima/baixo, respiro fino entre as fotos).
 
-Não chama nenhuma API de IA — zero tokens, zero custo. O único serviço
-externo é a busca do Unsplash, que é gratuita.
+Não chama nenhuma API de IA — zero tokens, zero custo. Os únicos serviços
+externos são as buscas de imagem, que são gratuitas.
+
+Você pode configurar **qualquer combinação** dos três bancos (Unsplash,
+Pexels, Pixabay) — mesmo só um já funciona. Com mais de um configurado, o
+sistema tenta na ordem Unsplash → Pexels → Pixabay e cai pro próximo
+automaticamente quando uma busca não retorna nada bom — cobre mais temas.
 
 ## Passo a passo pra colocar no ar (uns 10 minutos)
 
-### 1. Crie uma chave gratuita do Unsplash
+### 1. Crie chaves gratuitas dos bancos de imagens
 
+**Unsplash** (opcional, mas recomendado):
 1. Entre em https://unsplash.com/developers e faça login/cadastro (grátis).
 2. Clique em **"New Application"** (ou "Your apps" → "New Application").
 3. Aceite os termos, dê um nome qualquer pro app (ex: "Moodboard Rachel").
 4. Na página do app criado, copie o **Access Key**.
 
-Isso te dá 50 buscas por hora de graça, pra sempre — suficiente pra testar
-e usar em sala de aula. Não pede cartão de crédito.
+Dá 50 buscas por hora de graça, pra sempre. Não pede cartão.
+
+**Pexels** (opcional, mas recomendado):
+1. Entre em https://www.pexels.com/api/ e faça login/cadastro (grátis).
+2. Clique em **"Get Started"** / **"Your API Key"**.
+3. Copie a chave que aparece na tela (não precisa preencher formulário
+   nenhum de aprovação — a chave já vem liberada na hora).
+
+Dá 200 buscas por hora e 20.000 por mês de graça. Não pede cartão.
+
+**Pixabay** (opcional, mas recomendado):
+1. Entre em https://pixabay.com/api/docs/ e faça login/cadastro (grátis).
+2. A chave (**Your API Key**) já aparece direto no topo dessa página de
+   documentação, depois de logado — não precisa criar "app" nenhum.
+3. Copie a chave.
+
+Dá um limite bem generoso (100 requisições por 60 segundos), sem cartão.
+
+Se você já tem chaves de alguns desses bancos e não de outros, pode
+configurar só as que tiver por enquanto — o sistema funciona com qualquer
+combinação delas presentes, e você pode ir adicionando as outras depois.
 
 ### 2. Suba este projeto pro GitHub
 
@@ -31,9 +56,12 @@ e usar em sala de aula. Não pede cartão de crédito.
 1. Entre em https://vercel.com (login com GitHub é o mais rápido).
 2. Clique em **"Add New" → "Project"**.
 3. Selecione o repositório que você acabou de criar.
-4. Antes de clicar em "Deploy", abra **"Environment Variables"** e adicione:
-   - Nome: `UNSPLASH_ACCESS_KEY`
-   - Valor: a chave que você copiou no passo 1
+4. Antes de clicar em "Deploy", abra **"Environment Variables"** e adicione
+   uma linha para cada chave que você tiver (pode ser só uma, duas ou as
+   três):
+   - Nome: `UNSPLASH_ACCESS_KEY` → Valor: a chave do Unsplash
+   - Nome: `PEXELS_API_KEY` → Valor: a chave do Pexels
+   - Nome: `PIXABAY_API_KEY` → Valor: a chave do Pixabay
 5. Clique em **Deploy**.
 
 Em ~1 minuto o Vercel te dá um link tipo `seu-projeto.vercel.app` — esse já
@@ -49,8 +77,9 @@ combinação não fique boa.
 ## Como funciona (sem IA)
 
 O arquivo `api/moodboard.js` roda no servidor do Vercel (função serverless,
-grátis até um volume generoso de uso) e faz 7 buscas fixas no Unsplash,
-uma pra cada "papel" do moodboard:
+grátis até um volume generoso de uso) e faz 7 buscas fixas (Unsplash →
+Pexels → Pixabay, na ordem, com fallback automático), uma pra cada "papel"
+do moodboard:
 
 1. ambiente/vitrine (foto grande, âncora do board)
 2. produto/detalhe

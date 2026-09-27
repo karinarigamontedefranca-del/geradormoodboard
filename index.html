@@ -125,8 +125,8 @@
     credits.className = 'credits';
     credits.innerHTML = 'Fotos: ' + data.images
       .filter(x => x.creditUrl)
-      .map(x => `<a href="${x.creditUrl}" target="_blank" rel="noopener">${x.credit}</a>`)
-      .join(', ') + ' via Unsplash.';
+      .map(x => `<a href="${x.creditUrl}" target="_blank" rel="noopener">${x.credit}</a> (${x.source})`)
+      .join(', ') + '.';
     output.appendChild(credits);
 
     btnEmbaralhar.style.display = 'inline-block';
@@ -144,7 +144,7 @@
       statusEl.textContent = `Moodboard gerado para "${tema}".`;
     } catch (err) {
       statusEl.textContent = 'Erro: ' + err.message;
-      output.innerHTML = '<div class="empty">Não deu pra gerar o board. Confira se a UNSPLASH_ACCESS_KEY está configurada no projeto Vercel.</div>';
+      output.innerHTML = '<div class="empty">Não deu pra gerar o board. Confira se UNSPLASH_ACCESS_KEY, PEXELS_API_KEY e/ou PIXABAY_API_KEY estão configuradas no projeto Vercel.</div>';
     } finally {
       btnGerar.disabled = false;
       btnEmbaralhar.disabled = false;
