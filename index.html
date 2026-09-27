@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Gerador de Moodboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600&family=Work+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#EDE7DE;
+    --gutter:#F1E9E0;
+    --ink:#3A322C;
+    --ink-soft:#7A6F63;
+    --accent:#B4794F;
+    --card:#ffffff;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Work Sans',system-ui,sans-serif;
+    padding:32px 16px 64px;
+  }
+  .wrap{max-width:1100px;margin:0 auto}
+  .eyebrow{
+    font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--accent);font-weight:600;margin:0 0 6px;
+  }
+  h1{
+    font-family:'Fraunces',serif;font-weight:600;
+    font-size:clamp(24px,4vw,34px);margin:0 0 8px;
+  }
+  p.sub{margin:0 0 22px;color:var(--ink-soft);font-size:14px;max-width:60ch}
+
+  form{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px}
+  input[type=text]{
+    flex:1;min-width:220px;
+    padding:14px 16px;border:1px solid #d8cfc2;border-radius:6px;
+    font-size:15px;font-family:inherit;background:var(--card);color:var(--ink);
+  }
+  button{
+    padding:14px 20px;border:none;border-radius:6px;
+    background:var(--ink);color:#fff;font-family:inherit;font-size:14px;font-weight:600;
+    cursor:pointer;
+  }
+  button.secondary{background:transparent;color:var(--ink);border:1px solid #d8cfc2}
+  button:disabled{opacity:.5;cursor:wait}
+
+  .board{
+    position:relative;width:100%;aspect-ratio:16/9;
+    background:var(--gutter);overflow:hidden;
+  }
+  .cell{position:absolute;overflow:hidden;background:#00000010}
+  .cell img{width:100%;height:100%;object-fit:cover;display:block}
+
+  .status{font-size:13px;color:var(--ink-soft);margin:14px 0}
+  .credits{margin-top:14px;font-size:11px;color:var(--ink-soft);line-height:1.7}
+  .credits a{color:var(--ink-soft)}
+  .empty{
+    aspect-ratio:16/9;border:1px dashed #cabfae;border-radius:8px;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--ink-soft);font-size:14px;text-align:center;padding:24px;
+  }
+  @media (max-width:520px){
+    form{flex-direction:column}
+    button{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Sistema de moodboards · Rachel Patrocínio</p>
+  <h1>Gerador de moodboard</h1>
+  <p class="sub">Escreva um tema e o sistema busca 7 fotos reais de banco de imagens (Unsplash) e monta o board no mesmo formato bento dos moodboards de referência. Sem IA, sem custo.</p>
+
+  <form id="f">
+    <input type="text" id="tema" placeholder='Ex: "feira de natal", "loja de plantas", "coworking"' required />
+    <button type="submit" id="btnGerar">Gerar moodboard</button>
+    <button type="button" id="btnEmbaralhar" class="secondary" style="display:none">Embaralhar fotos</button>
+  </form>
+
+  <div id="status" class="status"></div>
+  <div id="output"></div>
+</div>
+
+<script>
+  const form = document.getElementById('f');
+  const temaInput = document.getElementById('tema');
+  const btnGerar = document.getElementById('btnGerar');
+  const btnEmbaralhar = document.getElementById('btnEmbaralhar');
+  const statusEl = document.getElementById('status');
+  const output = document.getElementById('output');
+
+  let variacao = 1;
+
+  function pct(n){ return (n*100).toFixed(2) + '%'; }
+
+  function render(data){
+    output.innerHTML = '';
+    const board = document.createElement('div');
+    board.className = 'board';
+
+    data.template.forEach((slot, i) => {
+      const img = data.images[i];
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.style.left = pct(slot.left);
+      cell.style.top = pct(slot.top);
+      cell.style.width = pct(slot.width);
+      cell.style.height = pct(slot.height);
+      if (img) {
+        const el = document.createElement('img');
+        el.src = img.url;
+        el.alt = img.alt || data.tema;
+        cell.appendChild(el);
+      }
+      board.appendChild(cell);
+    });
+
+    output.appendChild(board);
+
+    const credits = document.createElement('div');
+    credits.className = 'credits';
+    credits.innerHTML = 'Fotos: ' + data.images
+      .filter(x => x.creditUrl)
+      .map(x => `<a href="${x.creditUrl}" target="_blank" rel="noopener">${x.credit}</a>`)
+      .join(', ') + ' via Unsplash.';
+    output.appendChild(credits);
+
+    btnEmbaralhar.style.display = 'inline-block';
+  }
+
+  async function gerar(tema, variacaoParam){
+    statusEl.textContent = 'Buscando fotos no banco de imagens...';
+    btnGerar.disabled = true;
+    btnEmbaralhar.disabled = true;
+    try {
+      const r = await fetch(`/api/moodboard?tema=${encodeURIComponent(tema)}&variacao=${variacaoParam}`);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Erro desconhecido');
+      render(data);
+      statusEl.textContent = `Moodboard gerado para "${tema}".`;
+    } catch (err) {
+      statusEl.textContent = 'Erro: ' + err.message;
+      output.innerHTML = '<div class="empty">Não deu pra gerar o board. Confira se a UNSPLASH_ACCESS_KEY está configurada no projeto Vercel.</div>';
+    } finally {
+      btnGerar.disabled = false;
+      btnEmbaralhar.disabled = false;
+    }
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    variacao = 1;
+    gerar(temaInput.value.trim(), variacao);
+  });
+
+  btnEmbaralhar.addEventListener('click', () => {
+    variacao = variacao >= 3 ? 1 : variacao + 1;
+    gerar(temaInput.value.trim(), variacao);
+  });
+</script>
+</body>
+</html>

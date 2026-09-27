@@ -1,0 +1,7 @@
+{
+  "name": "gerador-moodboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Gerador de moodboard com fotos reais do Unsplash, sem IA e sem custo, para deploy no Vercel."
+}
