@@ -95,6 +95,12 @@
 
   let variacao = 1;
 
+  // mesma ordem do SHOT_LIST em api/moodboard.js — define qual papel cai em
+  // qual célula do template, já que data.images pode vir mais curto que 7
+  // (papel sem foto relevante o suficiente fica de fora, não é preenchido
+  // com qualquer coisa)
+  const ROLE_ORDER = ['ambiente', 'produto1', 'textura', 'acao', 'detalhe', 'produto2', 'atmosfera'];
+
   function pct(n){ return (n*100).toFixed(2) + '%'; }
 
   function render(data){
@@ -102,8 +108,12 @@
     const board = document.createElement('div');
     board.className = 'board';
 
+    const byRole = {};
+    data.images.forEach(img => { byRole[img.role] = img; });
+
     data.template.forEach((slot, i) => {
-      const img = data.images[i];
+      const role = ROLE_ORDER[i];
+      const img = byRole[role];
       const cell = document.createElement('div');
       cell.className = 'cell';
       cell.style.left = pct(slot.left);
@@ -115,11 +125,27 @@
         el.src = img.url;
         el.alt = img.alt || data.tema;
         cell.appendChild(el);
+      } else {
+        cell.style.display = 'flex';
+        cell.style.alignItems = 'center';
+        cell.style.justifyContent = 'center';
+        cell.style.fontSize = '12px';
+        cell.style.color = 'var(--ink-soft)';
+        cell.style.textAlign = 'center';
+        cell.style.padding = '8px';
+        cell.textContent = 'Sem foto relevante o bastante pra este tema';
       }
       board.appendChild(cell);
     });
 
     output.appendChild(board);
+
+    if (data.faltando > 0) {
+      const warn = document.createElement('p');
+      warn.className = 'status';
+      warn.textContent = `${data.faltando} de 7 fotos ficaram sem imagem relevante o bastante — tente um tema mais específico ou clique em Embaralhar.`;
+      output.appendChild(warn);
+    }
 
     const credits = document.createElement('div');
     credits.className = 'credits';
